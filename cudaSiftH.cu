@@ -117,7 +117,7 @@ void ExtractSiftLoop(SiftData &siftData, CudaImage &img, int numOctaves, double 
 #endif
   double totTime = timer.read();
 #ifdef VERBOSE
-  printf("ExtractSift time total =      %.2f ms\n\n", totTime);
+  //printf("ExtractSift time total =      %.2f ms\n\n", totTime);
 #endif
 }
 
@@ -177,11 +177,11 @@ void ExtractSiftOctave(SiftData &siftData, CudaImage &img, double initBlur, floa
 
   double totTime = timer0.read();
 #ifdef VERBOSE
-  printf("GPU time : %.2f ms + %.2f ms + %.2f ms = %.2f ms\n", totTime-gpuTimeDoG-gpuTimeSift, gpuTimeDoG, gpuTimeSift, totTime);
+  //printf("GPU time : %.2f ms + %.2f ms + %.2f ms = %.2f ms\n", totTime-gpuTimeDoG-gpuTimeSift, gpuTimeDoG, gpuTimeSift, totTime);
   safeCall(cudaMemcpyFromSymbol(&totPts, d_PointCounter, sizeof(int)));
   totPts = (totPts<siftData.maxPts ? totPts : siftData.maxPts);
-  if (totPts>0) 
-    printf("           %.2f ms / DoG,  %.4f ms / Sift,  #Sift = %d\n", gpuTimeDoG/NUM_SCALES, gpuTimeSift/(totPts-fstPts), totPts-fstPts); 
+  //if (totPts>0)
+    //printf("           %.2f ms / DoG,  %.4f ms / Sift,  #Sift = %d\n", gpuTimeDoG/NUM_SCALES, gpuTimeSift/(totPts-fstPts), totPts-fstPts);
 #endif
 }
 
@@ -347,8 +347,13 @@ double LowPass(CudaImage &res, CudaImage &src, float scale)
   int height = res.height;
   dim3 blocks(iDivUp(width, LOWPASS_W), iDivUp(height, LOWPASS_H));
   dim3 threads(LOWPASS_W+2*LOWPASS_R, LOWPASS_H);
-  LowPass<<<blocks, threads>>>(src.d_data, res.d_data, width, pitch, height);
-  //myLowPass<<<blocks, threads>>>(src.d_data, res.d_data, width, pitch, height);
+  //TimerGPU timer1;
+  //LowPass<<<blocks, threads>>>(src.d_data, res.d_data, width, pitch, height);
+  //double time1 = timer1.read();
+  //TimerGPU timer2;
+  myLowPass<<<blocks, threads>>>(src.d_data, res.d_data, width, pitch, height);
+  //double time2 = timer2.read();
+  //printf("The before time is %f, the after time is %f \n",time1,time2);
   checkMsg("LowPass() execution failed\n");
   return 0.0; 
 }

@@ -35,7 +35,7 @@
 #define LAPLACE_R       4
 
 #define LOWPASS_W      56
-#define LOWPASS_H      16
+#define LOWPASS_H       8
 #define LOWPASS_R       4
 
 //====================== Number of threads ====================//

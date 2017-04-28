@@ -453,8 +453,10 @@ __global__ void FindPointsMulti(float *d_Data0, SiftPoint *d_Sift, int width, in
   int scale = blockIdx.x - nScales*block;  //blockIdx.x % nScales
   int minx = block*MINMAX_W;  //start point of an image of each block
   int maxx = min(minx + MINMAX_W, width); //end point of an image of each block
-  int xpos = minx + tx;  //point of each thread 
-  int size = pitch*height;  //resize the image 
+  int xpos = minx + tx;  //point of each thread
+
+  int size = pitch*height;  //resize the image
+
   int ptr = size*scale + max(min(xpos-1, width-1), 0);  //point of each thread in DOG image
   
   if (tx==0)
@@ -678,42 +680,40 @@ __global__ void myLaplaceMultiMem(float *d_Image, float *d_Result, int width, in
 
  __global__ void myLowPass(float *d_Image, float *d_Result, int width, int pitch, int height)
 {
-  __shared__ float buffer[(LOWPASS_W + 2*LOWPASS_R)*LOWPASS_H];
-  __shared__ float data_share[LOWPASS_H*9];
-  const int tx = threadIdx.x;
-  const int ty = threadIdx.y;
-  const int xp = blockIdx.x*LOWPASS_W + tx;
-  const int yp = blockIdx.y*LOWPASS_H + ty;
-  float *kernel = d_Kernel2;
-  float *data = d_Image + max(min(xp - 4, width-1), 0);
-  float *buff = buffer + ty*(LOWPASS_W + 2*LOWPASS_R);
-  int h = height-1;
+    __shared__ float buffer[(LOWPASS_W + 2*LOWPASS_R)*LOWPASS_H];
+    __shared__ float data_share[LOWPASS_H*2*(LOWPASS_W+2*LOWPASS_R)];
+    const int tx = threadIdx.x;
+    const int ty = threadIdx.y;
+    const int xp = blockIdx.x*LOWPASS_W + tx;
+    const int yp = blockIdx.y*LOWPASS_H + ty;
+    float *kernel = d_Kernel2;
+    float *data = d_Image + max(min(xp - 4, width-1), 0);
+    float *buff = buffer + ty*(LOWPASS_W + 2*LOWPASS_R);
+    int h = height-1;
 
-//use shared memory to optimze the code, since shared memory is very fast
+    //use shared memory to optimze the code, since shared memory is very fast
 
-    if(tx<=8){
-    int offset = tx-4;
-        if(offset<0)
-            data_share[ty*LOWPASS_H+tx]=data[max(0, min(yp+offset, h))*pitch];
-        else
-            data_share[ty*LOWPASS_H+tx]=data[min(yp+offset, h)*pitch];
+    data_share[tx+(LOWPASS_W+2*LOWPASS_R)*(ty+4)]=data[max(0, min(yp, h))*pitch];
+    if(ty<4)
+        data_share[tx+(LOWPASS_W+2*LOWPASS_R)*(ty+4-LOWPASS_H/2)]=data[max(0, min(yp-LOWPASS_H/2, h))*pitch];
+    else
+        data_share[tx+(LOWPASS_W+2*LOWPASS_R)*(ty+4+LOWPASS_H/2)]=data[max(0, min(yp+LOWPASS_H/2, h))*pitch];
 
+
+    __syncthreads();
+
+    if (yp<height)
+        buff[tx] = kernel[4]*data_share[tx+(LOWPASS_W+2*LOWPASS_R)*(ty+4)] +
+            kernel[3]*(data_share[tx+(LOWPASS_W+2*LOWPASS_R)*(ty+3)] + data_share[tx+(LOWPASS_W+2*LOWPASS_R)*(ty+5)]) +
+            kernel[2]*(data_share[tx+(LOWPASS_W+2*LOWPASS_R)*(ty+2)] + data_share[tx+(LOWPASS_W+2*LOWPASS_R)*(ty+6)]) +
+            kernel[1]*(data_share[tx+(LOWPASS_W+2*LOWPASS_R)*(ty+1)] + data_share[tx+(LOWPASS_W+2*LOWPASS_R)*(ty+7)]) +
+            kernel[0]*(data_share[tx+(LOWPASS_W+2*LOWPASS_R)*(ty)] + data_share[tx+(LOWPASS_W+2*LOWPASS_R)*(ty+8)]);
+    __syncthreads();
+    if (tx<LOWPASS_W && xp<width && yp<height) {
+        d_Result[yp*pitch + xp] = kernel[4]*buff[tx+4] +
+            kernel[3]*(buff[tx+3] + buff[tx+5]) + kernel[2]*(buff[tx+2] + buff[tx+6]) +
+            kernel[1]*(buff[tx+1] + buff[tx+7]) + kernel[0]*(buff[tx+0] + buff[tx+8]);
     }
-
-__syncthreads();
-
-  if (yp<height)
-    buff[tx] = kernel[4]*data_share[ty*LOWPASS_H+4] +
-      kernel[3]*(data_share[ty*LOWPASS_H+3] + data_share[ty*LOWPASS_H+5]) +
-      kernel[2]*(data_share[ty*LOWPASS_H+2] + data_share[ty*LOWPASS_H+6]) +
-      kernel[1]*(data_share[ty*LOWPASS_H+1] + data_share[ty*LOWPASS_H+7]) +
-      kernel[0]*(data_share[ty*LOWPASS_H+0] + data_share[ty*LOWPASS_H+8]);
-  __syncthreads();
-  if (tx<LOWPASS_W && xp<width && yp<height) {
-    d_Result[yp*pitch + xp] = kernel[4]*buff[tx+4] + 
-      kernel[3]*(buff[tx+3] + buff[tx+5]) + kernel[2]*(buff[tx+2] + buff[tx+6]) + 
-      kernel[1]*(buff[tx+1] + buff[tx+7]) + kernel[0]*(buff[tx+0] + buff[tx+8]);
-  }
 }
 
 
