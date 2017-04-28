@@ -449,13 +449,13 @@ __global__ void FindPointsMulti(float *d_Data0, SiftPoint *d_Sift, int width, in
   __shared__ unsigned short points[96];
 
   int tx = threadIdx.x;
-  int block = blockIdx.x/nScales; 
-  int scale = blockIdx.x - nScales*block;
-  int minx = block*MINMAX_W;
-  int maxx = min(minx + MINMAX_W, width);
-  int xpos = minx + tx;
-  int size = pitch*height;
-  int ptr = size*scale + max(min(xpos-1, width-1), 0);
+  int block = blockIdx.x/nScales;  //flatting the blocks
+  int scale = blockIdx.x - nScales*block;  //blockIdx.x % nScales
+  int minx = block*MINMAX_W;  //start point of an image of each block
+  int maxx = min(minx + MINMAX_W, width); //end point of an image of each block
+  int xpos = minx + tx;  //point of each thread 
+  int size = pitch*height;  //resize the image 
+  int ptr = size*scale + max(min(xpos-1, width-1), 0);  //point of each thread in DOG image
   
   if (tx==0)
     cnt = 0; 
