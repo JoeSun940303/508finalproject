@@ -385,6 +385,7 @@ double LaplaceMulti(cudaTextureObject_t texObj, CudaImage &baseImage, CudaImage 
 
 #if 1
   LaplaceMultiMem<<<blocks, threads>>>(baseImage.d_data, results[0].d_data, width, pitch, height);
+
   //myLaplaceMultiMem<<<blocks, mythreads>>>(baseImage.d_data, results[0].d_data, width, pitch, height);
 #else
   LaplaceMultiTex<<<blocks, threads>>>(texObj, results[0].d_data, width, pitch, height);
