@@ -160,7 +160,9 @@ void ExtractSiftOctave(SiftData &siftData, CudaImage &img, double initBlur, floa
   int fstPts = 0;
   safeCall(cudaMemcpyFromSymbol(&fstPts, d_PointCounter, sizeof(int)));
   double sigma = baseBlur*diffScale;
-  FindPointsMulti(diffImg, siftData, thresh, 10.0f, sigma, 1.0f/NUM_SCALES, lowestScale/subsampling, subsampling);
+ // FindPointsMulti(diffImg, siftData, thresh, 10.0f, sigma, 1.0f/NUM_SCALES, lowestScale/subsampling, subsampling);
+  myFindPointsMulti(diffImg, siftData, thresh, 10.0f, sigma, 1.0f/NUM_SCALES, lowestScale/subsampling, subsampling);
+ 
   double gpuTimeDoG = timer1.read();
   TimerGPU timer4;
   int totPts = 0;
@@ -421,6 +423,39 @@ double FindPointsMulti(CudaImage *sources, SiftData &siftData, float thresh, flo
   FindPointsMulti<<<blocks, threads>>>(sources->d_data, siftData.m_data, w, p, h, NUM_SCALES, subsampling, lowestScale); 
 #else
   FindPointsMulti<<<blocks, threads>>>(sources->d_data, siftData.d_data, w, p, h, NUM_SCALES, subsampling, lowestScale); 
+#endif
+  checkMsg("FindPointsMulti() execution failed\n");
+  return 0.0;
+}
+
+
+double myFindPointsMulti(CudaImage *sources, SiftData &siftData, float thresh, float edgeLimit, float scale, float factor, float lowestScale, float subsampling)
+{
+  if (sources->d_data==NULL) {
+    printf("FindPointsMulti: missing data\n");
+    return 0.0;
+  }
+  int w = sources->width;
+  int p = sources->pitch;
+  int h = sources->height;
+  float threshs[2] = { thresh, -thresh };
+  float scales[NUM_SCALES];  
+  float diffScale = pow(2.0f, factor);
+  for (int i=0;i<NUM_SCALES;i++) {
+    scales[i] = scale;
+    scale *= diffScale;
+  }
+  safeCall(cudaMemcpyToSymbol(d_Threshold, &threshs, 2*sizeof(float)));
+  safeCall(cudaMemcpyToSymbol(d_EdgeLimit, &edgeLimit, sizeof(float)));
+  safeCall(cudaMemcpyToSymbol(d_Scales, scales, sizeof(float)*NUM_SCALES));
+  safeCall(cudaMemcpyToSymbol(d_Factor, &factor, sizeof(float)));
+
+  dim3 blocks(iDivUp(w, MINMAX_W), iDivUp(h, MINMAX_H));
+  dim3 threads(MINMAX_W + 2); 
+#ifdef MANAGEDMEM
+  myFindPointsMulti<<<blocks, threads>>>(sources->d_data, siftData.m_data, w, p, h, NUM_SCALES, subsampling, lowestScale); 
+#else
+  myFindPointsMulti<<<blocks, threads>>>(sources->d_data, siftData.d_data, w, p, h, NUM_SCALES, subsampling, lowestScale); 
 #endif
   checkMsg("FindPointsMulti() execution failed\n");
   return 0.0;
