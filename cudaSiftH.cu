@@ -394,8 +394,8 @@ double LaplaceMulti(cudaTextureObject_t texObj, CudaImage &baseImage, CudaImage 
   //TimerGPU timer2;
   myLaplaceMultiMem<<<myblocks, mythreads>>>(baseImage.d_data, results[0].d_data, width, pitch, height);
   //cudaDeviceSynchronize();
-  double time2 = timer2.read();
-  printf("The before time is %f, the after time is %f \n",time1,time2);
+  //double time2 = timer2.read();
+  //printf("The before time is %f, the after time is %f \n",time1,time2);
 #else
   LaplaceMultiTex<<<blocks, threads>>>(texObj, results[0].d_data, width, pitch, height);
 #endif
