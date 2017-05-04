@@ -387,11 +387,11 @@ double LaplaceMulti(cudaTextureObject_t texObj, CudaImage &baseImage, CudaImage 
   dim3 mythreads(LAPLACE_W+2*LAPLACE_R, 4);
 
 #if 1
-  TimerGPU timer1;
-  LaplaceMultiMem<<<blocks, threads>>>(baseImage.d_data, results[0].d_data, width, pitch, height);
+  //TimerGPU timer1;
+  //LaplaceMultiMem<<<blocks, threads>>>(baseImage.d_data, results[0].d_data, width, pitch, height);
   //cudaDeviceSynchronize();
-  double time1 = timer1.read();
-  TimerGPU timer2;
+  //double time1 = timer1.read();
+  //TimerGPU timer2;
   myLaplaceMultiMem<<<myblocks, mythreads>>>(baseImage.d_data, results[0].d_data, width, pitch, height);
   //cudaDeviceSynchronize();
   double time2 = timer2.read();
