@@ -590,8 +590,10 @@ __global__ void myFindPointsMulti(float *d_Data0, SiftPoint *d_Sift, int width, 
  // int minx = block*MINMAX_W;  //start point of an image of each block
   int minx = blockIdx.x * MINMAX_W;
   int maxx = min(minx + MINMAX_W, width); //end point of an image of each block
-  int xpos = minx + tx;  //point of each thread 
-  int size = pitch*height;  //resize the image 
+  int xpos = minx + tx;  //point of each thread
+
+  int size = pitch*height;  //resize the image
+
   //Before the for loop, we need load the 0 and 1 elements
   //In the inner loop, we need to load 3 element(1 per layer) per thread in the y direction, and calculate the corresponding max and min stored in shared memory
   //In one iteration of inner loop,  
@@ -844,33 +846,51 @@ __global__ void myFindPointsMulti(float *d_Data0, SiftPoint *d_Sift, int width, 
 
 __global__ void myLaplaceMultiMem(float *d_Image, float *d_Result, int width, int pitch, int height)
 {
-    __shared__ float data1[(LAPLACE_W + 2*LAPLACE_R)*LAPLACE_S];
-    __shared__ float data2[LAPLACE_W*LAPLACE_S];
+    __shared__ float data1[(LAPLACE_W + 2*LAPLACE_R)*LAPLACE_S*4];
+    __shared__ float data2[LAPLACE_W*LAPLACE_S*4];
+    __shared__ float data_share[12*(LAPLACE_W+2*LAPLACE_R)];
     const int tx = threadIdx.x;
+    const int ty = threadIdx.y;
     const int xp = blockIdx.x*LAPLACE_W + tx;
-    const int yp = blockIdx.y;
+    const int yp = blockIdx.y*4+ty;
     float *data = d_Image + max(min(xp - 4, width-1), 0);
     int h = height-1;
 
-    float data_register [9];   //use register to locate data
-    for(int i=0;i<=8;i++){
-        int tmp = i - 4;
-        data_register[i] = data[max(0, min(yp+tmp, h))*pitch];
-    }
+    //float data_register [9];   //use register to locate data
+    //for(int i=0;i<=8;i++){
+      //  int tmp = i - 4;
+       // data_register[i] = data[max(0, min(yp+tmp, h))*pitch];
+    //}
+
+    //because the size of block in y direction is 4, so each thread need to load three points
+    data_share[tx+(LAPLACE_W+2*LAPLACE_R)*(ty)]=data[max(0, min(yp-4, h))*pitch];
+    data_share[tx+(LAPLACE_W+2*LAPLACE_R)*(ty+4)]=data[max(0, min(yp, h))*pitch];
+    data_share[tx+(LAPLACE_W+2*LAPLACE_R)*(ty+8)]=data[max(0, min(yp+4, h))*pitch];
+
+    __syncthreads();
 
     for(int scale =7;scale>=0;scale--){
         //const int scale = threadIdx.y;
         float *kernel = d_Kernel2 + scale*16;
-        float *sdata1 = data1 + (LAPLACE_W + 2*LAPLACE_R)*scale;
+        float *sdata1 = data1 + (LAPLACE_W + 2*LAPLACE_R)*scale + ty*(LAPLACE_W + 2*LAPLACE_R)*LAPLACE_S;
 
-        sdata1[tx] = kernel[4]*data_register[4] +
+       /* sdata1[tx] = kernel[4]*data_register[4] +
             kernel[3]*(data_register[3] + data_register[5]) +
             kernel[2]*(data_register[2] + data_register[6]) +
             kernel[1]*(data_register[1] + data_register[7]) +
-            kernel[0]*(data_register[0] + data_register[8]);
+            kernel[0]*(data_register[0] + data_register[8]);*/
+
+        //__syncthreads();
+
+        sdata1[tx] = kernel[4]*data_share[tx+(LAPLACE_W+2*LAPLACE_R)*(ty+4)] +
+            kernel[3]*(data_share[tx+(LAPLACE_W+2*LAPLACE_R)*(ty+3)] + data_share[tx+(LAPLACE_W+2*LAPLACE_R)*(ty+5)]) +
+            kernel[2]*(data_share[tx+(LAPLACE_W+2*LAPLACE_R)*(ty+2)] + data_share[tx+(LAPLACE_W+2*LAPLACE_R)*(ty+6)]) +
+            kernel[1]*(data_share[tx+(LAPLACE_W+2*LAPLACE_R)*(ty+1)] + data_share[tx+(LAPLACE_W+2*LAPLACE_R)*(ty+7)]) +
+            kernel[0]*(data_share[tx+(LAPLACE_W+2*LAPLACE_R)*(ty)] + data_share[tx+(LAPLACE_W+2*LAPLACE_R)*(ty+8)]);
+
         __syncthreads();
 
-        float *sdata2 = data2 + LAPLACE_W*scale;
+        float *sdata2 = data2 + LAPLACE_W*scale + ty*LAPLACE_W*LAPLACE_S;
         if (tx<LAPLACE_W) {
         sdata2[tx] = kernel[4]*sdata1[tx+4] +
         kernel[3]*(sdata1[tx+3] + sdata1[tx+5]) + kernel[2]*(sdata1[tx+2] + sdata1[tx+6]) +

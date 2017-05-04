@@ -54,7 +54,7 @@ int main(int argc, char **argv)
 
   // A bit of benchmarking 
   for (thresh=1.00f;thresh<=4.01f;thresh+=0.50f) {
-    for (int i=0;i<10;i++) {
+    for (int i=0;i<1;i++) {
       ExtractSift(siftData1, img1, 5, initBlur, thresh, 0.0f, false);
       ExtractSift(siftData2, img2, 5, initBlur, thresh, 0.0f, false);
     }

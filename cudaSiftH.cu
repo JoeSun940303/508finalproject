@@ -160,8 +160,8 @@ void ExtractSiftOctave(SiftData &siftData, CudaImage &img, double initBlur, floa
   int fstPts = 0;
   safeCall(cudaMemcpyFromSymbol(&fstPts, d_PointCounter, sizeof(int)));
   double sigma = baseBlur*diffScale;
- // FindPointsMulti(diffImg, siftData, thresh, 10.0f, sigma, 1.0f/NUM_SCALES, lowestScale/subsampling, subsampling);
-  myFindPointsMulti(diffImg, siftData, thresh, 10.0f, sigma, 1.0f/NUM_SCALES, lowestScale/subsampling, subsampling);
+  FindPointsMulti(diffImg, siftData, thresh, 10.0f, sigma, 1.0f/NUM_SCALES, lowestScale/subsampling, subsampling);
+  //myFindPointsMulti(diffImg, siftData, thresh, 10.0f, sigma, 1.0f/NUM_SCALES, lowestScale/subsampling, subsampling);
  
   double gpuTimeDoG = timer1.read();
   TimerGPU timer4;
@@ -183,7 +183,7 @@ void ExtractSiftOctave(SiftData &siftData, CudaImage &img, double initBlur, floa
   safeCall(cudaMemcpyFromSymbol(&totPts, d_PointCounter, sizeof(int)));
   totPts = (totPts<siftData.maxPts ? totPts : siftData.maxPts);
   //if (totPts>0)
-    //printf("           %.2f ms / DoG,  %.4f ms / Sift,  #Sift = %d\n", gpuTimeDoG/NUM_SCALES, gpuTimeSift/(totPts-fstPts), totPts-fstPts);
+   // printf("           %.2f ms / DoG,  %.4f ms / Sift,  #Sift = %d\n", gpuTimeDoG/NUM_SCALES, gpuTimeSift/(totPts-fstPts), totPts-fstPts);
 #endif
 }
 
@@ -382,13 +382,20 @@ double LaplaceMulti(cudaTextureObject_t texObj, CudaImage &baseImage, CudaImage 
   int pitch = results[0].pitch;
   int height = results[0].height;
   dim3 blocks(iDivUp(width, LAPLACE_W), height);
+  dim3 myblocks(iDivUp(width, LAPLACE_W), iDivUp(height,4));
   dim3 threads(LAPLACE_W+2*LAPLACE_R, LAPLACE_S);
-  dim3 mythreads(LAPLACE_W+2*LAPLACE_R, 1);
+  dim3 mythreads(LAPLACE_W+2*LAPLACE_R, 4);
 
 #if 1
+  TimerGPU timer1;
   LaplaceMultiMem<<<blocks, threads>>>(baseImage.d_data, results[0].d_data, width, pitch, height);
-
-  //myLaplaceMultiMem<<<blocks, mythreads>>>(baseImage.d_data, results[0].d_data, width, pitch, height);
+  //cudaDeviceSynchronize();
+  double time1 = timer1.read();
+  TimerGPU timer2;
+  myLaplaceMultiMem<<<myblocks, mythreads>>>(baseImage.d_data, results[0].d_data, width, pitch, height);
+  //cudaDeviceSynchronize();
+  double time2 = timer2.read();
+  printf("The before time is %f, the after time is %f \n",time1,time2);
 #else
   LaplaceMultiTex<<<blocks, threads>>>(texObj, results[0].d_data, width, pitch, height);
 #endif
