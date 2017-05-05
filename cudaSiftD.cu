@@ -434,7 +434,110 @@ __global__ void ComputeOrientations(cudaTextureObject_t texObj, SiftPoint *d_Sif
       }
     } 
   }
-} 
+}
+
+__global__ void myComputeOrientations(cudaTextureObject_t texObj, SiftPoint *d_Sift, int fstPts)
+{
+    __shared__ float hist[64];
+    __shared__ float gauss[11];
+    __shared__ float texObj_share[169];
+    // __shared__ cudaTextureObject_t texObj_share[169];
+    const int tx = threadIdx.x;
+    const int bx = blockIdx.x + fstPts;
+    float i2sigma2 = -1.0f/(4.5f*d_Sift[bx].scale*d_Sift[bx].scale);
+
+    if (tx<11)
+        gauss[tx] = exp(i2sigma2*(tx-5)*(tx-5));
+    if (tx<64)
+        hist[tx] = 0.0f;
+    __syncthreads();
+    float xp = d_Sift[bx].xpos - 5.0f;
+    float yp = d_Sift[bx].ypos - 5.0f;
+    int yd = tx/11;
+    int xd = tx - yd*11;
+    //int xf = xp + xd;
+    //int yf = yp + yd;
+
+
+
+    //load texObj to SM
+    int yd2=tx/13;
+    int xd2=tx-yd2*13;
+    float xf2=xp-1+xd2;
+    float yf2=yp-1+yd2;
+    texObj_share[tx]=tex2D<float>(texObj,xf2,yf2);
+
+    __syncthreads();
+
+
+
+    if (yd<11) {
+        float dx =(float)(texObj_share[(xd+2)+(yd+1)*13] - texObj_share[(xd)+(yd+1)*13])  ;
+        float dy = (float)(texObj_share[(xd+1)+(yd+2)*13] - texObj_share[(xd+1)+(yd)*13]) ;
+        //float dx = tex2D<float>(texObj, xf+1.0, yf) - tex2D<float>(texObj, xf-1.0, yf);
+        //float dy = tex2D<float>(texObj, xf, yf+1.0) - tex2D<float>(texObj, xf, yf-1.0);
+
+        //float dx = tex2D<float>(texObj_share, xf+1.0, yf) - tex2D<float>(texObj_share, xf-1.0, yf);
+        //float dy = tex2D<float>(texObj_share, xf, yf+1.0) - tex2D<float>(texObj_share, xf, yf-1.0);
+
+        int bin = 16.0f*atan2f(dy, dx)/3.1416f + 16.5f;
+        if (bin>31)
+            bin = 0;
+        float grad = sqrtf(dx*dx + dy*dy);
+        atomicAdd(&hist[bin], grad*gauss[xd]*gauss[yd]);
+    }
+    __syncthreads();
+    int x1m = (tx>=1 ? tx-1 : tx+31);
+    int x1p = (tx<=30 ? tx+1 : tx-31);
+    if (tx<32) {
+        int x2m = (tx>=2 ? tx-2 : tx+30);
+        int x2p = (tx<=29 ? tx+2 : tx-30);
+        hist[tx+32] = 6.0f*hist[tx] + 4.0f*(hist[x1m] + hist[x1p]) + (hist[x2m] + hist[x2p]);
+    }
+    __syncthreads();
+    if (tx<32) {
+        float v = hist[32+tx];
+        hist[tx] = (v>hist[32+x1m] && v>=hist[32+x1p] ? v : 0.0f);
+    }
+    __syncthreads();
+    if (tx==0) {
+        float maxval1 = 0.0;
+        float maxval2 = 0.0;
+        int i1 = -1;
+        int i2 = -1;
+        for (int i=0;i<32;i++) {
+            float v = hist[i];
+                if (v>maxval1) {
+                    maxval2 = maxval1;
+                    maxval1 = v;
+                    i2 = i1;
+                    i1 = i;
+            } else if (v>maxval2) {
+                        maxval2 = v;
+                        i2 = i;
+            }
+        }
+        float val1 = hist[32+((i1+1)&31)];
+        float val2 = hist[32+((i1+31)&31)];
+        float peak = i1 + 0.5f*(val1-val2) / (2.0f*maxval1-val1-val2);
+        d_Sift[bx].orientation = 11.25f*(peak<0.0f ? peak+32.0f : peak);
+        if (maxval2>0.8f*maxval1 && false) {
+            float val1 = hist[32+((i2+1)&31)];
+            float val2 = hist[32+((i2+31)&31)];
+            float peak = i2 + 0.5f*(val1-val2) / (2.0f*maxval2-val1-val2);
+            unsigned int idx = atomicInc(d_PointCounter, 0x7fffffff);
+            if (idx<d_MaxNumPoints) {
+                d_Sift[idx].xpos = d_Sift[bx].xpos;
+                d_Sift[idx].ypos = d_Sift[bx].ypos;
+                d_Sift[idx].scale = d_Sift[bx].scale;
+                d_Sift[idx].sharpness = d_Sift[bx].sharpness;
+                d_Sift[idx].edgeness = d_Sift[bx].edgeness;
+                d_Sift[idx].orientation = 11.25f*(peak<0.0f ? peak+32.0f : peak);;
+                d_Sift[idx].subsampling = d_Sift[bx].subsampling;
+        }
+    }
+}
+}
 
 ///////////////////////////////////////////////////////////////////////////////
 // Subtract two images (multi-scale version)
@@ -766,9 +869,9 @@ __global__ void myFindPointsMulti(float *d_Data0, SiftPoint *d_Sift, int width, 
       if (sc>=lowestScale) {
   unsigned int idx = atomicInc(d_PointCounter, 0x7fffffff);
   idx = (idx>=maxPts ? maxPts-1 : idx);
-  d_Sift[idx].xpos = xpos + pdx;
-  d_Sift[idx].ypos = ypos + pdy;
-  d_Sift[idx].scale = sc;
+d_Sift[idx].xpos = xpos ;//+ pdx;
+d_Sift[idx].ypos = ypos; //+ pdy;
+  d_Sift[idx].scale = scale;
   d_Sift[idx].sharpness = val + dval;
   d_Sift[idx].edgeness = edge;
   d_Sift[idx].subsampling = subsampling;

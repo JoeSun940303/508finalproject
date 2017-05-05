@@ -162,7 +162,7 @@ void ExtractSiftOctave(SiftData &siftData, CudaImage &img, double initBlur, floa
   double sigma = baseBlur*diffScale;
   FindPointsMulti(diffImg, siftData, thresh, 10.0f, sigma, 1.0f/NUM_SCALES, lowestScale/subsampling, subsampling);
   //myFindPointsMulti(diffImg, siftData, thresh, 10.0f, sigma, 1.0f/NUM_SCALES, lowestScale/subsampling, subsampling);
- 
+
   double gpuTimeDoG = timer1.read();
   TimerGPU timer4;
   int totPts = 0;
@@ -299,15 +299,33 @@ double ScaleUp(CudaImage &res, CudaImage &src)
 
 double ComputeOrientations(cudaTextureObject_t texObj, SiftData &siftData, int fstPts, int totPts)
 {
-  dim3 blocks(totPts - fstPts);
-  dim3 threads(128);
-#ifdef MANAGEDMEM
-  ComputeOrientations<<<blocks, threads>>>(texObj, siftData.m_data, fstPts);
-#else
-  ComputeOrientations<<<blocks, threads>>>(texObj, siftData.d_data, fstPts);
-#endif
-  checkMsg("ComputeOrientations() execution failed\n");
-  return 0.0;
+    dim3 blocks(totPts - fstPts);
+    dim3 threads(169);
+    #ifdef MANAGEDMEM
+    TimerGPU timer1;
+    ComputeOrientations<<<blocks, threads>>>(texObj, siftData.m_data, fstPts);
+    //cudaDeviceSynchronize();
+    double time1 = timer1.read();
+    TimerGPU timer2;
+    myComputeOrientations<<<blocks, threads>>>(texObj, siftData.m_data, fstPts);
+    //cudaDeviceSynchronize();
+    double time2 = timer2.read();
+    printf("The before time is %f, the after time is %f \n",time1,time2);
+
+
+    #else
+    TimerGPU timer1;
+    ComputeOrientations<<<blocks, threads>>>(texObj, siftData.d_data, fstPts);
+    //cudaDeviceSynchronize();
+    double time1 = timer1.read();
+    TimerGPU timer2;
+    myComputeOrientations<<<blocks, threads>>>(texObj, siftData.d_data, fstPts);
+    //cudaDeviceSynchronize();
+    double time2 = timer2.read();
+    printf("else:The before time is %f, the after time is %f \n",time1,time2);
+    #endif
+    checkMsg("ComputeOrientations() execution failed\n");
+    return 0.0;
 }
 
 double ExtractSiftDescriptors(cudaTextureObject_t texObj, SiftData &siftData, int fstPts, int totPts, float subsampling)
