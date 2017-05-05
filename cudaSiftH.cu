@@ -314,15 +314,15 @@ double ComputeOrientations(cudaTextureObject_t texObj, SiftData &siftData, int f
 
 
     #else
-    TimerGPU timer1;
-    ComputeOrientations<<<blocks, threads>>>(texObj, siftData.d_data, fstPts);
+    //TimerGPU timer1;
+    //ComputeOrientations<<<blocks, threads>>>(texObj, siftData.d_data, fstPts);
     //cudaDeviceSynchronize();
-    double time1 = timer1.read();
-    TimerGPU timer2;
+    //double time1 = timer1.read();
+    //TimerGPU timer2;
     myComputeOrientations<<<blocks, threads>>>(texObj, siftData.d_data, fstPts);
     //cudaDeviceSynchronize();
-    double time2 = timer2.read();
-    printf("else:The before time is %f, the after time is %f \n",time1,time2);
+    //double time2 = timer2.read();
+    //printf("else:The before time is %f, the after time is %f \n",time1,time2);
     #endif
     checkMsg("ComputeOrientations() execution failed\n");
     return 0.0;
