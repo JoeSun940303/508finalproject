@@ -1008,11 +1008,144 @@ __global__ void myLaplaceMultiMem(float *d_Image, float *d_Result, int width, in
 
 }
 
+
+
+__global__ void myLaplaceMultiMem_register(float *d_Image, float *d_Result, int width, int pitch, int height)
+{
+    __shared__ float data1[(LAPLACE_W + 2*LAPLACE_R)*LAPLACE_S*4];
+    __shared__ float data2[LAPLACE_W*LAPLACE_S*4];
+    __shared__ float data_share[12*(LAPLACE_W+2*LAPLACE_R)];
+    const int tx = threadIdx.x;
+    const int ty = threadIdx.y;
+    const int xp = blockIdx.x*LAPLACE_W + tx;
+    const int yp = blockIdx.y*4+ty;
+    float *data = d_Image + max(min(xp - 4, width-1), 0);
+    int h = height-1;
+
+
+    //because the size of block in y direction is 4, so each thread need to load three points
+    data_share[tx+(LAPLACE_W+2*LAPLACE_R)*(ty)]=data[max(0, min(yp-4, h))*pitch];
+    data_share[tx+(LAPLACE_W+2*LAPLACE_R)*(ty+4)]=data[max(0, min(yp, h))*pitch];
+    data_share[tx+(LAPLACE_W+2*LAPLACE_R)*(ty+8)]=data[max(0, min(yp+4, h))*pitch];
+
+    __syncthreads();
+
+    float reg0,reg1,reg2,reg3,reg4;
+    reg0 = data_share[tx+(LAPLACE_W+2*LAPLACE_R)*(ty+4)];
+    reg1 = data_share[tx+(LAPLACE_W+2*LAPLACE_R)*(ty+3)] + data_share[tx+(LAPLACE_W+2*LAPLACE_R)*(ty+5)];
+    reg2 = data_share[tx+(LAPLACE_W+2*LAPLACE_R)*(ty+2)] + data_share[tx+(LAPLACE_W+2*LAPLACE_R)*(ty+6)];
+    reg3 = data_share[tx+(LAPLACE_W+2*LAPLACE_R)*(ty+1)] + data_share[tx+(LAPLACE_W+2*LAPLACE_R)*(ty+7)];
+    reg4 = data_share[tx+(LAPLACE_W+2*LAPLACE_R)*(ty)] + data_share[tx+(LAPLACE_W+2*LAPLACE_R)*(ty+8)];
+
+
+
+    for(int scale =7;scale>=0;scale--){
+        //const int scale = threadIdx.y;
+        float *kernel = d_Kernel2 + scale*16;
+        float *sdata1 = data1 + (LAPLACE_W + 2*LAPLACE_R)*scale + ty*(LAPLACE_W + 2*LAPLACE_R)*LAPLACE_S;
+
+
+        sdata1[tx] = kernel[4]*reg0 +
+        kernel[3]*(reg1) +
+        kernel[2]*(reg2) +
+        kernel[1]*(reg3) +
+        kernel[0]*(reg4);
+
+        __syncthreads();
+
+        float *sdata2 = data2 + LAPLACE_W*scale + ty*LAPLACE_W*LAPLACE_S;
+        if (tx<LAPLACE_W) {
+            sdata2[tx] = kernel[4]*sdata1[tx+4] +
+                kernel[3]*(sdata1[tx+3] + sdata1[tx+5]) + kernel[2]*(sdata1[tx+2] + sdata1[tx+6]) +
+                kernel[1]*(sdata1[tx+1] + sdata1[tx+7]) + kernel[0]*(sdata1[tx+0] + sdata1[tx+8]);
+
+        }
+        __syncthreads();
+        if (tx<LAPLACE_W && scale<LAPLACE_S-1 && xp<width)
+            d_Result[scale*height*pitch + yp*pitch + xp] = sdata2[tx] - sdata2[tx+LAPLACE_W];
+        __syncthreads();
+    }
+
+}
+
+
+
+
+
+
+__global__ void myLaplaceMultiMem_register_shuffle(float *d_Image, float *d_Result, int width, int pitch, int height)
+{
+    //__shared__ float data1[(24 + 2*LAPLACE_R)*LAPLACE_S*4];
+    __shared__ float data2[24*LAPLACE_S*4];
+    __shared__ float data_share[12*(24+2*LAPLACE_R)];
+    const int tx = threadIdx.x;
+    const int ty = threadIdx.y;
+    const int xp = blockIdx.x*24 + tx;
+    const int yp = blockIdx.y*4+ty;
+    float *data = d_Image + max(min(xp - 4, width-1), 0);
+    int h = height-1;
+
+    //because the size of block in y direction is 4, so each thread need to load three points
+    data_share[tx+(24+2*LAPLACE_R)*(ty)]=data[max(0, min(yp-4, h))*pitch];
+    data_share[tx+(24+2*LAPLACE_R)*(ty+4)]=data[max(0, min(yp, h))*pitch];
+    data_share[tx+(24+2*LAPLACE_R)*(ty+8)]=data[max(0, min(yp+4, h))*pitch];
+
+    __syncthreads();
+
+    float reg0,reg1,reg2,reg3,reg4;
+    reg0 = data_share[tx+(24+2*LAPLACE_R)*(ty+4)];
+    reg1 = data_share[tx+(24+2*LAPLACE_R)*(ty+3)] + data_share[tx+(24+2*LAPLACE_R)*(ty+5)];
+    reg2 = data_share[tx+(24+2*LAPLACE_R)*(ty+2)] + data_share[tx+(24+2*LAPLACE_R)*(ty+6)];
+    reg3 = data_share[tx+(24+2*LAPLACE_R)*(ty+1)] + data_share[tx+(24+2*LAPLACE_R)*(ty+7)];
+    reg4 = data_share[tx+(24+2*LAPLACE_R)*(ty)] + data_share[tx+(24+2*LAPLACE_R)*(ty+8)];
+
+
+
+    for(int scale =7;scale>=0;scale--){
+    //const int scale = threadIdx.y;
+    float *kernel = d_Kernel2 + scale*16;
+    //float *sdata1 = data1 + (24 + 2*LAPLACE_R)*scale + ty*(24 + 2*LAPLACE_R)*LAPLACE_S;
+    float mybuffer;
+
+    //__syncthreads();
+
+    mybuffer = kernel[4]*reg0 +
+    kernel[3]*(reg1) +
+    kernel[2]*(reg2) +
+    kernel[1]*(reg3) +
+    kernel[0]*(reg4);
+
+    //__syncthreads();
+    float buffer1 = __shfl(mybuffer, tx+1);
+    float buffer2 = __shfl(mybuffer, tx+2);
+    float buffer3 = __shfl(mybuffer, tx+3);
+    float buffer4 = __shfl(mybuffer, tx+4);
+    float buffer5 = __shfl(mybuffer, tx+5);
+    float buffer6 = __shfl(mybuffer, tx+6);
+    float buffer7 = __shfl(mybuffer, tx+7);
+    float buffer8 = __shfl(mybuffer, tx+8);
+
+
+    float *sdata2 = data2 + 24*scale + ty*24*LAPLACE_S;
+    if (tx<24) {
+        sdata2[tx] = kernel[4]*buffer4 +
+            kernel[3]*(buffer3 + buffer5) + kernel[2]*(buffer2 +buffer6) +
+            kernel[1]*(buffer1 + buffer7) + kernel[0]*(mybuffer + buffer8);
+
+    }
+    __syncthreads();
+    if (tx<24 && scale<LAPLACE_S-1 && xp<width)
+    d_Result[scale*height*pitch + yp*pitch + xp] = sdata2[tx] - sdata2[tx+24];
+    __syncthreads();
+    }
+
+}
+
  __global__ void myLowPass(float *d_Image, float *d_Result, int width, int pitch, int height)
 {
     __shared__ float buffer[(LOWPASS_W + 2*LOWPASS_R)*LOWPASS_H];
     __shared__ float data_share[LOWPASS_H*2*(LOWPASS_W+2*LOWPASS_R)];
-    float mybuffer;
+    //float mybuffer;
     const int tx = threadIdx.x;
     const int ty = threadIdx.y;
     const int xp = blockIdx.x*LOWPASS_W + tx;

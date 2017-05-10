@@ -401,17 +401,23 @@ double LaplaceMulti(cudaTextureObject_t texObj, CudaImage &baseImage, CudaImage 
   int pitch = results[0].pitch;
   int height = results[0].height;
   dim3 blocks(iDivUp(width, LAPLACE_W), height);
-  dim3 myblocks(iDivUp(width, LAPLACE_W), iDivUp(height,4));
   dim3 threads(LAPLACE_W+2*LAPLACE_R, LAPLACE_S);
+
+  dim3 myblocks(iDivUp(width, LAPLACE_W), iDivUp(height,4));
   dim3 mythreads(LAPLACE_W+2*LAPLACE_R, 4);
+
+  dim3 myblocks_shuffle(iDivUp(width, 24), iDivUp(height,4));
+  dim3 mythreads_shuffle(24+2*LAPLACE_R, 4);
 
 #if 1
   //TimerGPU timer1;
   //LaplaceMultiMem<<<blocks, threads>>>(baseImage.d_data, results[0].d_data, width, pitch, height);
+  //myLaplaceMultiMem<<<myblocks, mythreads>>>(baseImage.d_data, results[0].d_data, width, pitch, height);
+  //myLaplaceMultiMem_register<<<myblocks, mythreads>>>(baseImage.d_data, results[0].d_data, width, pitch, height);
   //cudaDeviceSynchronize();
   //double time1 = timer1.read();
   //TimerGPU timer2;
-  myLaplaceMultiMem<<<myblocks, mythreads>>>(baseImage.d_data, results[0].d_data, width, pitch, height);
+  myLaplaceMultiMem_register_shuffle<<<myblocks_shuffle, mythreads_shuffle>>>(baseImage.d_data, results[0].d_data, width, pitch, height);
   //cudaDeviceSynchronize();
   //double time2 = timer2.read();
   //printf("The before time is %f, the after time is %f \n",time1,time2);
