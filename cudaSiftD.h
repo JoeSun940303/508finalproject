@@ -34,7 +34,7 @@
 // Laplace filter kernel radius
 #define LAPLACE_R       4
 
-#define LOWPASS_W      56
+#define LOWPASS_W      24
 #define LOWPASS_H       8
 #define LOWPASS_R       4
 

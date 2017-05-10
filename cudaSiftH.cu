@@ -368,12 +368,13 @@ double LowPass(CudaImage &res, CudaImage &src, float scale)
   dim3 blocks(iDivUp(width, LOWPASS_W), iDivUp(height, LOWPASS_H));
   dim3 threads(LOWPASS_W+2*LOWPASS_R, LOWPASS_H);
   //TimerGPU timer1;
-  //LowPass<<<blocks, threads>>>(src.d_data, res.d_data, width, pitch, height);
+  //myLowPass<<<blocks, threads>>>(src.d_data, res.d_data, width, pitch, height);
   //double time1 = timer1.read();
   //TimerGPU timer2;
-  myLowPass<<<blocks, threads>>>(src.d_data, res.d_data, width, pitch, height);
+  myLowPass_shuffle<<<blocks, threads>>>(src.d_data, res.d_data, width, pitch, height);
   //double time2 = timer2.read();
   //printf("The before time is %f, the after time is %f \n",time1,time2);
+  myLowPass_shuffle<<<blocks, threads>>>(src.d_data, res.d_data, width, pitch, height);
   checkMsg("LowPass() execution failed\n");
   return 0.0; 
 }

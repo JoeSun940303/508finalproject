@@ -1012,6 +1012,7 @@ __global__ void myLaplaceMultiMem(float *d_Image, float *d_Result, int width, in
 {
     __shared__ float buffer[(LOWPASS_W + 2*LOWPASS_R)*LOWPASS_H];
     __shared__ float data_share[LOWPASS_H*2*(LOWPASS_W+2*LOWPASS_R)];
+    float mybuffer;
     const int tx = threadIdx.x;
     const int ty = threadIdx.y;
     const int xp = blockIdx.x*LOWPASS_W + tx;
@@ -1043,8 +1044,61 @@ __global__ void myLaplaceMultiMem(float *d_Image, float *d_Result, int width, in
         d_Result[yp*pitch + xp] = kernel[4]*buff[tx+4] +
             kernel[3]*(buff[tx+3] + buff[tx+5]) + kernel[2]*(buff[tx+2] + buff[tx+6]) +
             kernel[1]*(buff[tx+1] + buff[tx+7]) + kernel[0]*(buff[tx+0] + buff[tx+8]);
+
+
+
     }
 }
+
+__global__ void myLowPass_shuffle(float *d_Image, float *d_Result, int width, int pitch, int height)
+{
+    //__shared__ float buffer[(LOWPASS_W + 2*LOWPASS_R)*LOWPASS_H];
+    __shared__ float data_share[LOWPASS_H*2*(LOWPASS_W+2*LOWPASS_R)];
+    float mybuffer;
+    const int tx = threadIdx.x;
+    const int ty = threadIdx.y;
+    const int xp = blockIdx.x*LOWPASS_W + tx;
+    const int yp = blockIdx.y*LOWPASS_H + ty;
+    float *kernel = d_Kernel2;
+    float *data = d_Image + max(min(xp - 4, width-1), 0);
+    //float *buff = buffer + ty*(LOWPASS_W + 2*LOWPASS_R);
+    int h = height-1;
+
+    //use shared memory to optimze the code, since shared memory is very fast
+
+    data_share[tx+(LOWPASS_W+2*LOWPASS_R)*(ty+4)]=data[max(0, min(yp, h))*pitch];
+    if(ty<4)
+        data_share[tx+(LOWPASS_W+2*LOWPASS_R)*(ty+4-LOWPASS_H/2)]=data[max(0, min(yp-LOWPASS_H/2, h))*pitch];
+    else
+        data_share[tx+(LOWPASS_W+2*LOWPASS_R)*(ty+4+LOWPASS_H/2)]=data[max(0, min(yp+LOWPASS_H/2, h))*pitch];
+
+
+__syncthreads();
+
+if (yp<height)
+    mybuffer = kernel[4]*data_share[tx+(LOWPASS_W+2*LOWPASS_R)*(ty+4)] +
+        kernel[3]*(data_share[tx+(LOWPASS_W+2*LOWPASS_R)*(ty+3)] + data_share[tx+(LOWPASS_W+2*LOWPASS_R)*(ty+5)]) +
+        kernel[2]*(data_share[tx+(LOWPASS_W+2*LOWPASS_R)*(ty+2)] + data_share[tx+(LOWPASS_W+2*LOWPASS_R)*(ty+6)]) +
+        kernel[1]*(data_share[tx+(LOWPASS_W+2*LOWPASS_R)*(ty+1)] + data_share[tx+(LOWPASS_W+2*LOWPASS_R)*(ty+7)]) +
+        kernel[0]*(data_share[tx+(LOWPASS_W+2*LOWPASS_R)*(ty)] + data_share[tx+(LOWPASS_W+2*LOWPASS_R)*(ty+8)]);
+//__syncthreads();
+        float buffer1 = __shfl(mybuffer, tx+1);
+        float buffer2 = __shfl(mybuffer, tx+2);
+        float buffer3 = __shfl(mybuffer, tx+3);
+        float buffer4 = __shfl(mybuffer, tx+4);
+        float buffer5 = __shfl(mybuffer, tx+5);
+        float buffer6 = __shfl(mybuffer, tx+6);
+        float buffer7 = __shfl(mybuffer, tx+7);
+        float buffer8 = __shfl(mybuffer, tx+8);
+        if (tx<LOWPASS_W && xp<width && yp<height) {
+            d_Result[yp*pitch + xp] = kernel[4]*buffer4 +
+            kernel[3]*(buffer3 + buffer5) + kernel[2]*(buffer2 + buffer6) +
+            kernel[1]*(buffer1 + buffer7) + kernel[0]*(mybuffer + buffer8);
+
+
+    }
+}
+
 
 
 __global__ void LowPass(float *d_Image, float *d_Result, int width, int pitch, int height)
