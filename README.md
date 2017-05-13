@@ -1,4 +1,8 @@
 # CudaSift - SIFT features with CUDA
+Note: This code is from repository https://github.com/Celebrandil/CudaSift
+This code aims to optimize that the cudasift and we add some new kernels to it
+This code is just for study.
+
 
 This is the fourth version of a SIFT (Scale Invariant Feature Transform) implementation using CUDA for GPUs from NVidia. The first version is from 2007 and GPUs have evolved since then. This version is slightly more precise and considerably faster than the previous versions and has been optimized for Kepler and later generations of GPUs.
 
