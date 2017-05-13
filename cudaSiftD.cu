@@ -671,8 +671,146 @@ __global__ void FindPointsMulti(float *d_Data0, SiftPoint *d_Sift, int width, in
   }
 }
 
+__global__ void myFindPointsMulti_first(float *d_Data0, SiftPoint *d_Sift, int width, int pitch, int height, int nScales, float subsampling, float lowestScale)
+{
+  #define MEMWID (MINMAX_W + 2)
+  __shared__ float ymin1[MEMWID], ymin2[MEMWID], ymin3[MEMWID];
+  __shared__ float ymax1[MEMWID], ymax2[MEMWID], ymax3[MEMWID];
+  __shared__ unsigned int cnt;
+  __shared__ unsigned short points[96];
 
-__global__ void myFindPointsMulti(float *d_Data0, SiftPoint *d_Sift, int width, int pitch, int height, int nScales, float subsampling, float lowestScale)
+  int tx = threadIdx.x;
+  int block = blockIdx.x/nScales;  //flatting the blocks
+  int scale = blockIdx.x - nScales*block;  //blockIdx.x % nScales
+  int minx = block*MINMAX_W;  //start point of an image of each block
+  int maxx = min(minx + MINMAX_W, width); //end point of an image of each block
+  int xpos = minx + tx;  //point of each thread
+
+  int size = pitch*height;  //resize the image
+
+  int ptr = size*scale + max(min(xpos-1, width-1), 0);  //point of each thread in DOG image
+  
+  if (tx==0)
+    cnt = 0; 
+  __syncthreads();
+  float d10,d11,d12,d20,d21,d22,d30,d31,d32;
+  int ypos = MINMAX_H*blockIdx.y ;
+  int yptr0 = ptr + max(0,ypos-1)*pitch;
+  int yptr1 = ptr + ypos*pitch;
+  int yptr2 = ptr + min(height-1,ypos+1)*pitch;
+  d10 = d_Data0[yptr0];
+  d11 = d_Data0[yptr1];
+  d30 = d_Data0[yptr0 + 2*size];
+  d31 = d_Data0[yptr1 + 2*size];
+  d20 = d_Data0[yptr0 + 1*size];
+  d21 = d_Data0[yptr1 + 1*size];
+  
+  int yloops = min(height - MINMAX_H*blockIdx.y, MINMAX_H);
+  for (int y=0;y<yloops;y++) {
+
+    {
+      d12 = d_Data0[yptr2];
+      ymin1[tx] = fminf(fminf(d10, d11), d12);
+      ymax1[tx] = fmaxf(fmaxf(d10, d11), d12);
+    }
+    {
+      
+      d32 = d_Data0[yptr2 + 2*size]; 
+      ymin3[tx] = fminf(fminf(d30, d31), d32);
+      ymax3[tx] = fmaxf(fmaxf(d30, d31), d32);
+    }
+    
+    d22 = d_Data0[yptr2 + 1*size];
+    ymin2[tx] = fminf(fminf(ymin1[tx], fminf(fminf(d20, d21), d22)), ymin3[tx]);
+    ymax2[tx] = fmaxf(fmaxf(ymax1[tx], fmaxf(fmaxf(d20, d21), d22)), ymax3[tx]);
+    __syncthreads(); 
+    if (tx>0 && tx<MINMAX_W+1 && xpos<=maxx) {
+      if (d21<d_Threshold[1]) {
+  float minv = fminf(fminf(fminf(ymin2[tx-1], ymin2[tx+1]), ymin1[tx]), ymin3[tx]);
+  minv = fminf(fminf(minv, d20), d22);
+  if (d21<minv) { 
+    int pos = atomicInc(&cnt, 31);
+    points[3*pos+0] = xpos - 1;
+    points[3*pos+1] = ypos;
+    points[3*pos+2] = scale;
+  }
+      } 
+      if (d21>d_Threshold[0]) {
+  float maxv = fmaxf(fmaxf(fmaxf(ymax2[tx-1], ymax2[tx+1]), ymax1[tx]), ymax3[tx]);
+  maxv = fmaxf(fmaxf(maxv, d20), d22);
+  if (d21>maxv) { 
+    int pos = atomicInc(&cnt, 31);
+    points[3*pos+0] = xpos - 1;
+    points[3*pos+1] = ypos;
+    points[3*pos+2] = scale;
+  }
+      }
+    }
+    d10 = d11;
+    d11 = d12;
+    d20 = d21;
+    d21 = d22;
+    d30 = d31;
+    d31 = d32;
+    ypos = MINMAX_H*blockIdx.y +y +1 ;
+    yptr2 = ptr + min(height-1,ypos+1)*pitch;
+    __syncthreads();
+  }
+  if (tx<cnt) {
+    int xpos = points[3*tx+0];
+    int ypos = points[3*tx+1];
+    int scale = points[3*tx+2];
+    int ptr = xpos + (ypos + (scale+1)*height)*pitch;
+    float val = d_Data0[ptr];
+    float *data1 = &d_Data0[ptr];
+    float dxx = 2.0f*val - data1[-1] - data1[1];
+    float dyy = 2.0f*val - data1[-pitch] - data1[pitch];
+    float dxy = 0.25f*(data1[+pitch+1] + data1[-pitch-1] - data1[-pitch+1] - data1[+pitch-1]);
+    float tra = dxx + dyy;
+    float det = dxx*dyy - dxy*dxy;
+    if (tra*tra<d_EdgeLimit*det) {
+      float edge = __fdividef(tra*tra, det);
+      float dx = 0.5f*(data1[1] - data1[-1]);
+      float dy = 0.5f*(data1[pitch] - data1[-pitch]); 
+      float *data0 = d_Data0 + ptr - height*pitch;
+      float *data2 = d_Data0 + ptr + height*pitch;
+      float ds = 0.5f*(data0[0] - data2[0]); 
+      float dss = 2.0f*val - data2[0] - data0[0];
+      float dxs = 0.25f*(data2[1] + data0[-1] - data0[1] - data2[-1]);
+      float dys = 0.25f*(data2[pitch] + data0[-pitch] - data2[-pitch] - data0[pitch]);
+      float idxx = dyy*dss - dys*dys;
+      float idxy = dys*dxs - dxy*dss;   
+      float idxs = dxy*dys - dyy*dxs;
+      float idet = __fdividef(1.0f, idxx*dxx + idxy*dxy + idxs*dxs);
+      float idyy = dxx*dss - dxs*dxs;
+      float idys = dxy*dxs - dxx*dys;
+      float idss = dxx*dyy - dxy*dxy;
+      float pdx = idet*(idxx*dx + idxy*dy + idxs*ds);
+      float pdy = idet*(idxy*dx + idyy*dy + idys*ds);
+      float pds = idet*(idxs*dx + idys*dy + idss*ds);
+      if (pdx<-0.5f || pdx>0.5f || pdy<-0.5f || pdy>0.5f || pds<-0.5f || pds>0.5f) {
+  pdx = __fdividef(dx, dxx);
+  pdy = __fdividef(dy, dyy);
+  pds = __fdividef(ds, dss);
+      }
+      float dval = 0.5f*(dx*pdx + dy*pdy + ds*pds);
+      int maxPts = d_MaxNumPoints;
+      float sc = d_Scales[scale] * exp2f(pds*d_Factor);
+      if (sc>=lowestScale) {
+  unsigned int idx = atomicInc(d_PointCounter, 0x7fffffff);
+  idx = (idx>=maxPts ? maxPts-1 : idx);
+  d_Sift[idx].xpos = xpos + pdx;
+  d_Sift[idx].ypos = ypos + pdy;
+  d_Sift[idx].scale = sc;
+  d_Sift[idx].sharpness = val + dval;
+  d_Sift[idx].edgeness = edge;
+  d_Sift[idx].subsampling = subsampling;
+      }
+    }
+  }
+}
+
+__global__ void myFindPointsMulti_second(float *d_Data0, SiftPoint *d_Sift, int width, int pitch, int height, int nScales, float subsampling, float lowestScale)
 {
   #define MEMWID (MINMAX_W + 2)
   __shared__ float ymin2[MEMWID];//the min and max for 9 elements, shared in the xy plane
@@ -693,10 +831,8 @@ __global__ void myFindPointsMulti(float *d_Data0, SiftPoint *d_Sift, int width, 
  // int minx = block*MINMAX_W;  //start point of an image of each block
   int minx = blockIdx.x * MINMAX_W;
   int maxx = min(minx + MINMAX_W, width); //end point of an image of each block
-  int xpos = minx + tx;  //point of each thread
-
-  int size = pitch*height;  //resize the image
-
+  int xpos = minx + tx;  //point of each thread 
+  int size = pitch*height;  //resize the image 
   //Before the for loop, we need load the 0 and 1 elements
   //In the inner loop, we need to load 3 element(1 per layer) per thread in the y direction, and calculate the corresponding max and min stored in shared memory
   //In one iteration of inner loop,  
@@ -822,9 +958,9 @@ __global__ void myFindPointsMulti(float *d_Data0, SiftPoint *d_Sift, int width, 
     d2_start = 6 - d3_start;
     d[d3_start + 0] = d30;
     d[d3_start + 1] = d31;
-
+__syncthreads();
   }
-  __syncthreads();
+  //__syncthreads();
   for(tx = tx; tx < cnt; tx += MINMAX_W+2 ){
   
     int xpos = points[3*tx+0];
@@ -869,9 +1005,9 @@ __global__ void myFindPointsMulti(float *d_Data0, SiftPoint *d_Sift, int width, 
       if (sc>=lowestScale) {
   unsigned int idx = atomicInc(d_PointCounter, 0x7fffffff);
   idx = (idx>=maxPts ? maxPts-1 : idx);
-d_Sift[idx].xpos = xpos ;//+ pdx;
-d_Sift[idx].ypos = ypos; //+ pdy;
-  d_Sift[idx].scale = scale;
+  d_Sift[idx].xpos = xpos + pdx;
+  d_Sift[idx].ypos = ypos  + pdy;
+  d_Sift[idx].scale = sc;
   d_Sift[idx].sharpness = val + dval;
   d_Sift[idx].edgeness = edge;
   d_Sift[idx].subsampling = subsampling;
@@ -880,7 +1016,473 @@ d_Sift[idx].ypos = ypos; //+ pdy;
   }
 }
 
+__global__ void myFindPointsMulti_third(float *d_Data0, SiftPoint *d_Sift, int width, int pitch, int height, int nScales, float subsampling, float lowestScale)
+{
+  #define MEMWID (MINMAX_W + 2)
+  __shared__ float ymin_9[MEMWID*4];//the min and max for 9 elements, shared in the xy plane
+  __shared__ float ymax_9[MEMWID*4];//only used when determine if key point or not, used per iteration, update per iteration
+ // float ymin[3*4];//the min and max for every 3 elements in 3 layers in the four inner loop(3*4*num of threads), shared by the z direction
+ // float ymax[3*4];//used by new iteration in the outer loop, update when starting a new iteration in outer loop
+ // float d[6];
+  __shared__ unsigned int cnt;
+  __shared__ unsigned short points[96*5];
 
+  int tx = threadIdx.x; //
+  int ty = threadIdx.y;
+ // int block = blockIdx.x/nScales;  //flatting the blocks
+ // int scale = blockIdx.x - nScales*block;  //blockIdx.x % nScales
+ // int minx = block*MINMAX_W;  //start point of an image of each block
+  int minx = blockIdx.x * MINMAX_W;
+  int maxx = min(minx + MINMAX_W, width); //end point of an image of each block
+  int xpos = minx + tx;  //point of each thread 
+  int size = pitch*height;  //resize the image 
+  //Before the for loop, we need load the 0 and 1 elements
+  //In the inner loop, we need to load 3 element(1 per layer) per thread in the y direction, and calculate the corresponding max and min stored in shared memory
+  //In one iteration of inner loop,  
+  //the ptr should be in  the for loop
+  if (tx==0)
+    cnt = 0; 
+  __syncthreads();
+  int yloops = min(height - MINMAX_H*blockIdx.y, MINMAX_H); //number of elements in y direction
+ // if(ty<yloops){
+    int ptr = size*0 + max(min(xpos-1, width-1), 0); //thread position(among layers)
+    int ypos = MINMAX_H * blockIdx.y + ty; //for the first iteration in the y direction
+    int yptr0 = ptr + max(0,ypos-1)*pitch;
+    int yptr1 = ptr + ypos*pitch;
+    int yptr2 = ptr + min(height-1,ypos+1)*pitch;
+    float d10 = d_Data0[yptr0];
+    float d11 = d_Data0[yptr1];
+    float d20 = d_Data0[yptr0 + 1*size];
+    float d21 = d_Data0[yptr1 + 1*size];
+    float d30 = d_Data0[yptr0 + 2*size];
+    float d31 = d_Data0[yptr1 + 2*size];
+    float d12, d22, d32, ymin1,ymin2, ymin3, ymax1, ymax2, ymax3;
+    for(int scale = 0; scale < 5; scale ++){
+      if(scale == 0){
+        
+        float d12 = d_Data0[yptr2];
+          float d22 = d_Data0[yptr2 + 1*size];
+          float d32 = d_Data0[yptr2 + 2*size];
+          float ymin1 = fminf(fminf(d10, d11), d12);
+          float ymax1 = fmaxf(fmaxf(d10, d11), d12);
+          float ymin2 = fminf(fminf(d20, d21), d22); //y+4 is the start of second layer
+          float ymax2 = fmaxf(fmaxf(d20, d21), d22);
+          float ymin3 = fminf(fminf(d30, d31), d32);// y+8 is the start of third layer
+          float ymax3 = fmaxf(fmaxf(d30, d31), d32);
+          ymin_9[ty * MEMWID + tx] = fminf(fminf(ymin1, ymin2), ymin3); //this goes to shared memory
+          ymax_9[ty * MEMWID + tx] = fmaxf(fmaxf(ymax1, ymax2), ymax3);
+        
+          __syncthreads();
+        //  if(ty<yloops){
+          
+          if (tx>0 && tx<MINMAX_W+1 && xpos<=maxx){
+            if (d21<d_Threshold[1]){
+                float minv = fminf(fminf(fminf(ymin_9[tx-1 + ty * MEMWID], ymin_9[tx+1 + ty * MEMWID]), ymin1), ymin3);
+                minv = fminf(fminf(minv, d20), d22);
+                if (d21<minv) {
+                    int pos = atomicInc(&cnt, 155);
+                    points[3*pos+0] = xpos - 1;
+                    points[3*pos+1] = ypos;
+                    points[3*pos+2] = scale;
+                }
+              }
+              if(d21>d_Threshold[0]){
+                float maxv = fmaxf(fmaxf(fmaxf(ymax_9[tx-1 + ty * MEMWID], ymax_9[tx+1 + ty * MEMWID]), ymax1), ymax3);
+                maxv = fmaxf(fmaxf(maxv, d20), d22);
+                if(d21>maxv){
+                    int pos = atomicInc(&cnt, 155);
+                    points[3*pos+0] = xpos - 1;
+                    points[3*pos+1] = ypos;
+                    points[3*pos+2] = scale;
+                }
+              }
+          }//}
+            ymin1 = ymin2;
+          ymin2 = ymin3;
+          ymax1 = ymax2;
+          ymax2 = ymax3;
+          d20 = d30;
+          d21 = d31;
+          d22 = d32;
+                
+          }
+      
+      if(scale !=0){
+        float d30 = d_Data0[yptr0 + 2*size];
+        float d31 = d_Data0[yptr1 + 2*size];
+        float d32 = d_Data0[yptr2 + 2*size];
+        ymin3 = fminf(fminf(d30, d31), d32);// y+8 is the start of third layer
+          ymax3 = fmaxf(fmaxf(d30, d31), d32);
+          ymin_9[ty * MEMWID + tx] = fminf(fminf(ymin1, ymin2), ymin3); //this goes to shared memory
+          ymax_9[ty * MEMWID + tx] = fmaxf(fmaxf(ymax1, ymax2), ymax3);
+          __syncthreads();
+          //if(ty<yloops){
+      
+          if (tx>0 && tx<MINMAX_W+1 && xpos<=maxx){
+            if (d21<d_Threshold[1]){
+                float minv = fminf(fminf(fminf(ymin_9[tx-1 + ty * MEMWID], ymin_9[tx+1 + ty * MEMWID]), ymin1), ymin3);
+                minv = fminf(fminf(minv, d20), d22);
+                if (d21<minv) {
+                    int pos = atomicInc(&cnt, 155);
+                    points[3*pos+0] = xpos - 1;
+                    points[3*pos+1] = ypos;
+                    points[3*pos+2] = scale;
+                }
+              }
+              if(d21>d_Threshold[0]){
+                float maxv = fmaxf(fmaxf(fmaxf(ymax_9[tx-1 + ty * MEMWID], ymax_9[tx+1 + ty * MEMWID]), ymax1), ymax3);
+                maxv = fmaxf(fmaxf(maxv, d20), d22);
+                if(d21>maxv){
+                    int pos = atomicInc(&cnt, 155);
+                    points[3*pos+0] = xpos - 1;
+                    points[3*pos+1] = ypos;
+                    points[3*pos+2] = scale;
+                }
+              }
+          }//}
+        
+            ymin1 = ymin2;
+          ymin2 = ymin3;
+          ymax1 = ymax2;
+          ymax2 = ymax3;
+          d20 = d30;
+          d21 = d31;
+          d22 = d32;
+
+      }
+    
+      
+      ptr = size*(scale+1) + max(min(xpos-1, width-1), 0); //thread position(among layers)
+      yptr0 = ptr + max(0,ypos-1)*pitch;
+      yptr1 = ptr + ypos*pitch;
+      yptr2 = ptr + min(height-1,ypos+1)*pitch;
+      __syncthreads();
+    }
+
+  //}
+ __syncthreads();
+  tx = tx + ty * MEMWID;
+  if(tx < cnt){
+    int xpos = points[3*tx+0];
+    int ypos = points[3*tx+1];
+    int scale = points[3*tx+2];
+    int ptr = xpos + (ypos + (scale+1)*height)*pitch;
+    float val = d_Data0[ptr];
+    float *data1 = &d_Data0[ptr];
+    float dxx = 2.0f*val - data1[-1] - data1[1];
+    float dyy = 2.0f*val - data1[-pitch] - data1[pitch];
+    float dxy = 0.25f*(data1[+pitch+1] + data1[-pitch-1] - data1[-pitch+1] - data1[+pitch-1]);
+    float tra = dxx + dyy;
+    float det = dxx*dyy - dxy*dxy;
+    if (tra*tra<d_EdgeLimit*det) {
+      float edge = __fdividef(tra*tra, det);
+      float dx = 0.5f*(data1[1] - data1[-1]);
+      float dy = 0.5f*(data1[pitch] - data1[-pitch]); 
+      float *data0 = d_Data0 + ptr - height*pitch;
+      float *data2 = d_Data0 + ptr + height*pitch;
+      float ds = 0.5f*(data0[0] - data2[0]); 
+      float dss = 2.0f*val - data2[0] - data0[0];
+      float dxs = 0.25f*(data2[1] + data0[-1] - data0[1] - data2[-1]);
+      float dys = 0.25f*(data2[pitch] + data0[-pitch] - data2[-pitch] - data0[pitch]);
+      float idxx = dyy*dss - dys*dys;
+      float idxy = dys*dxs - dxy*dss;   
+      float idxs = dxy*dys - dyy*dxs;
+      float idet = __fdividef(1.0f, idxx*dxx + idxy*dxy + idxs*dxs);
+      float idyy = dxx*dss - dxs*dxs;
+      float idys = dxy*dxs - dxx*dys;
+      float idss = dxx*dyy - dxy*dxy;
+      float pdx = idet*(idxx*dx + idxy*dy + idxs*ds);
+      float pdy = idet*(idxy*dx + idyy*dy + idys*ds);
+      float pds = idet*(idxs*dx + idys*dy + idss*ds);
+      if (pdx<-0.5f || pdx>0.5f || pdy<-0.5f || pdy>0.5f || pds<-0.5f || pds>0.5f) {
+  pdx = __fdividef(dx, dxx);
+  pdy = __fdividef(dy, dyy);
+  pds = __fdividef(ds, dss);
+      }
+      float dval = 0.5f*(dx*pdx + dy*pdy + ds*pds);
+      int maxPts = d_MaxNumPoints;
+      float sc = d_Scales[scale] * exp2f(pds*d_Factor);
+      if (sc>=lowestScale) {
+  unsigned int idx = atomicInc(d_PointCounter, 0x7fffffff);
+  idx = (idx>=maxPts ? maxPts-1 : idx);
+  d_Sift[idx].xpos = xpos + pdx;
+  d_Sift[idx].ypos = ypos + pdy ;
+  d_Sift[idx].scale = sc;
+  d_Sift[idx].sharpness = val + dval;
+  d_Sift[idx].edgeness = edge;
+  d_Sift[idx].subsampling = subsampling;
+      }
+    }
+  }
+}
+
+__global__ void myLaplaceMultiMem_register_shuffle_findpoints(float *d_Image, SiftPoint *d_Sift , int width, int pitch, int height,int nScales, float subsampling, float lowestScale)
+{
+    //__shared__ float data1[(24 + 2*LAPLACE_R)*LAPLACE_S*4];
+     __shared__ float data2[24*LAPLACE_S*6];
+    __shared__ float data_share[14*(24+2*LAPLACE_R)];
+    int tx = threadIdx.x;
+    const int ty = threadIdx.y;
+    int xp = blockIdx.x*22 + tx-1;
+    int yp = blockIdx.y*4+ty-1;
+
+    float *data = d_Image + max(min(xp - 4, width-1), 0);
+    int h = height-1;
+    int w = width - 1;
+//    yp = max(0, min(yp, h));
+
+    __shared__ float dog[24*6*7];
+    __shared__ unsigned int cnt;
+    __shared__ unsigned short points[96];
+
+    if(tx == 0) cnt = 0;
+
+    //because the size of block in y direction is 4, so each thread need to load three points
+  /*  data_share[tx+(24+2*LAPLACE_R)*(ty)]=data[max(0, min(yp-4, h))*pitch];
+    data_share[tx+(24+2*LAPLACE_R)*(ty+4)]=data[max(0, min(yp, h))*pitch];
+    data_share[tx+(24+2*LAPLACE_R)*(ty+8)]=data[max(0, min(yp+4, h))*pitch]; */
+    int yadd = yp-4;
+    for(int i = ty; i < 14; i+= 6){
+      data_share[tx+(24+2*LAPLACE_R)*(i)]=data[max(0, min(yadd, h))*pitch];
+      yadd += 6;
+    }
+
+    __syncthreads();
+
+    float reg0,reg1,reg2,reg3,reg4;
+    reg0 = data_share[tx+(24+2*LAPLACE_R)*(ty+4)];
+    reg1 = data_share[tx+(24+2*LAPLACE_R)*(ty+3)] + data_share[tx+(24+2*LAPLACE_R)*(ty+5)];
+    reg2 = data_share[tx+(24+2*LAPLACE_R)*(ty+2)] + data_share[tx+(24+2*LAPLACE_R)*(ty+6)];
+    reg3 = data_share[tx+(24+2*LAPLACE_R)*(ty+1)] + data_share[tx+(24+2*LAPLACE_R)*(ty+7)];
+    reg4 = data_share[tx+(24+2*LAPLACE_R)*(ty)] + data_share[tx+(24+2*LAPLACE_R)*(ty+8)];
+
+
+    //int the first 3 iteration, nso need to calculate the
+    for(int scale =7;scale>=0;scale--){
+    //const int scale = threadIdx.y;
+    float *kernel = d_Kernel2 + scale*16;
+    //float *sdata1 = data1 + (24 + 2*LAPLACE_R)*scale + ty*(24 + 2*LAPLACE_R)*LAPLACE_S;
+    float mybuffer;
+
+    //__syncthreads();
+
+    mybuffer = kernel[4]*reg0 +
+    kernel[3]*(reg1) +
+    kernel[2]*(reg2) +
+    kernel[1]*(reg3) +
+    kernel[0]*(reg4);
+
+    //__syncthreads();
+    float buffer1 = __shfl(mybuffer, tx+1);
+    float buffer2 = __shfl(mybuffer, tx+2);
+    float buffer3 = __shfl(mybuffer, tx+3);
+    float buffer4 = __shfl(mybuffer, tx+4);
+    float buffer5 = __shfl(mybuffer, tx+5);
+    float buffer6 = __shfl(mybuffer, tx+6);
+    float buffer7 = __shfl(mybuffer, tx+7);
+    float buffer8 = __shfl(mybuffer, tx+8);
+
+
+    float *sdata2 = data2 + 24*scale + ty*24*LAPLACE_S;
+    if (tx<24) {
+        sdata2[tx] = kernel[4]*buffer4 +
+            kernel[3]*(buffer3 + buffer5) + kernel[2]*(buffer2 +buffer6) +
+            kernel[1]*(buffer1 + buffer7) + kernel[0]*(mybuffer + buffer8);
+
+    }
+    __syncthreads();
+    if (tx<24 && scale<LAPLACE_S-1 && xp<width){
+    yp = max(0, min(yp, h));
+    xp = max(0, min(xp, w));
+   //d_Result[scale*height*pitch + yp*pitch + xp] = sdata2[tx] - sdata2[tx+24];}
+    dog[scale * 24 * 6 + ty*24 + tx] = sdata2[tx] - sdata2[tx+24];}
+    __syncthreads();
+    
+  }
+    //values for find points
+    #define MEMWID (22 + 2)
+    __shared__ float ymin_9[MEMWID*4];
+    __shared__ float ymax_9[MEMWID*4];
+    
+    int minx = blockIdx.x * 22;
+    int maxx = min(minx + 22,width);
+    int xpos = minx + tx;
+    int size = 24 * 6;
+    int ypos = 4 * blockIdx.y + ty;
+    if(tx<24 && ty < 4 && xpos < width && ypos < height ){
+    int ptr = size * 0 + tx;
+    int yptr0 = ptr + ty*24;
+    int yptr1 = ptr + (ty + 1)*24;
+    int yptr2 = ptr + (ty + 2)*24;
+    float d10 = dog[yptr0];
+    float d11 = dog[yptr1];
+    float d20 = dog[yptr0 + 1*size];
+    float d21 = dog[yptr1 + 1*size];
+    float d30 = dog[yptr0 + 2*size];
+    float d31 = dog[yptr1 + 2*size];
+    float d12, d22, d32, ymin1,ymin2, ymin3, ymax1, ymax2, ymax3;
+    for(int scale = 0; scale < 5; scale ++){
+      if(scale == 0){
+
+        float d12 = dog[yptr2];
+          float d22 = dog[yptr2 + 1*size];
+          float d32 = dog[yptr2 + 2*size];
+          float ymin1 = fminf(fminf(d10, d11), d12);
+          float ymax1 = fmaxf(fmaxf(d10, d11), d12);
+          float ymin2 = fminf(fminf(d20, d21), d22); //y+4 is the start of second layer
+          float ymax2 = fmaxf(fmaxf(d20, d21), d22);
+          float ymin3 = fminf(fminf(d30, d31), d32);// y+8 is the start of third layer
+          float ymax3 = fmaxf(fmaxf(d30, d31), d32);
+          ymin_9[ty * MEMWID + tx] = fminf(fminf(ymin1, ymin2), ymin3); //this goes to shared memory
+          ymax_9[ty * MEMWID + tx] = fmaxf(fmaxf(ymax1, ymax2), ymax3);
+
+          __syncthreads();
+        //  if(ty<yloops){
+
+          if (tx>0 && tx<23 && xpos<=maxx){
+            if (d21<d_Threshold[1]){
+                float minv = fminf(fminf(fminf(ymin_9[tx-1 + ty * MEMWID], ymin_9[tx+1 + ty * MEMWID]), ymin1), ymin3);
+                minv = fminf(fminf(minv, d20), d22);
+                if (d21<minv) {
+                    int pos = atomicInc(&cnt, 31);
+                    points[3*pos+0] = xpos - 1;
+                    points[3*pos+1] = ypos;
+                    points[3*pos+2] = scale;
+                }
+              }
+              if(d21>d_Threshold[0]){
+                float maxv = fmaxf(fmaxf(fmaxf(ymax_9[tx-1 + ty * MEMWID], ymax_9[tx+1 + ty * MEMWID]), ymax1), ymax3);
+                maxv = fmaxf(fmaxf(maxv, d20), d22);
+                if(d21>maxv){
+                    int pos = atomicInc(&cnt, 31);
+                    points[3*pos+0] = xpos - 1;
+                    points[3*pos+1] = ypos;
+                    points[3*pos+2] = scale;
+                }
+              }
+          }//}
+            ymin1 = ymin2;
+          ymin2 = ymin3;
+          ymax1 = ymax2;
+          ymax2 = ymax3;
+          d20 = d30;
+          d21 = d31;
+          d22 = d32;
+
+          }
+
+      if(scale !=0){
+        float d30 = dog[yptr0 + 2*size];
+        float d31 = dog[yptr1 + 2*size];
+        float d32 = dog[yptr2 + 2*size];
+        ymin3 = fminf(fminf(d30, d31), d32);// y+8 is the start of third layer
+          ymax3 = fmaxf(fmaxf(d30, d31), d32);
+          ymin_9[ty * MEMWID + tx] = fminf(fminf(ymin1, ymin2), ymin3); //this goes to shared memory
+          ymax_9[ty * MEMWID + tx] = fmaxf(fmaxf(ymax1, ymax2), ymax3);
+          __syncthreads();
+          //if(ty<yloops){
+
+          if (tx>0 && tx<23 && xpos<=maxx){
+            if (d21<d_Threshold[1]){
+                float minv = fminf(fminf(fminf(ymin_9[tx-1 + ty * MEMWID], ymin_9[tx+1 + ty * MEMWID]), ymin1), ymin3);
+                minv = fminf(fminf(minv, d20), d22);
+                if (d21<minv) {
+                    int pos = atomicInc(&cnt, 31);
+                    points[3*pos+0] = xpos - 1;
+                    points[3*pos+1] = ypos;
+                    points[3*pos+2] = scale;
+                }
+              }
+              if(d21>d_Threshold[0]){
+                float maxv = fmaxf(fmaxf(fmaxf(ymax_9[tx-1 + ty * MEMWID], ymax_9[tx+1 + ty * MEMWID]), ymax1), ymax3);
+                maxv = fmaxf(fmaxf(maxv, d20), d22);
+                if(d21>maxv){
+                    int pos = atomicInc(&cnt, 31);
+                    points[3*pos+0] = xpos - 1;
+                    points[3*pos+1] = ypos;
+                    points[3*pos+2] = scale;
+                }
+              }
+          }//}
+
+            ymin1 = ymin2;
+          ymin2 = ymin3;
+          ymax1 = ymax2;
+          ymax2 = ymax3;
+          d20 = d30;
+          d21 = d31;
+          d22 = d32;
+
+      }
+       ptr = size * (scale+1) + tx;
+      yptr0 = ptr + ty*24;
+      yptr1 = ptr + (ty + 1)*24;
+      yptr2 = ptr + (ty + 2)*24;
+
+
+      __syncthreads();
+    }}
+    tx = tx + ty * 24;
+if(tx < cnt){
+  int xpos = points[3*tx+0];
+  int ypos = points[3*tx+1];
+  int scale = points[3*tx+2];
+  int txshared = xpos-blockIdx.x*22+1;
+  int tyshared = ypos - blockIdx.y * 4 + 1;
+  //int ptr = xpos + (ypos + (scale+1)*height)*pitch;
+  int ptr = (scale+1)*24 * 6 + tyshared * 24 + txshared;
+  float val = dog[ptr];
+  float *data1 = dog + ptr;
+  float dxx = 2.0f*val - data1[-1] - data1[1];
+  float dyy = 2.0f*val - data1[-24] - data1[24];
+  float dxy = 0.25f*(data1[+24+1]);
+  dxy += 0.25f * data1[-24-1];
+  dxy += 0.25f* data1[-24+1];
+  dxy += 0.25f * data1[+24-1];
+  float tra = dxx + dyy;
+  float det = dxx*dyy - dxy*dxy;
+  if (tra*tra<d_EdgeLimit*det) {
+    float edge = __fdividef(tra*tra, det);
+    float dx = 0.5f*(data1[1] - data1[-1]);
+    float dy = 0.5f*(data1[24] - data1[-24]);
+    float *data0 = dog + ptr - 24*6;
+    float *data2 = dog + ptr + 24*6;
+    float ds = 0.5f*(data0[0] - data2[0]);
+    float dss = 2.0f*val - data2[0] - data0[0];
+    float dxs = 0.25f*(data2[1] + data0[-1] - data0[1] - data2[-1]);
+    float dys = 0.25f*(data2[24] + data0[-24] - data2[-24] - data0[24]);
+    float idxx = dyy*dss - dys*dys;
+    float idxy = dys*dxs - dxy*dss;
+    float idxs = dxy*dys - dyy*dxs;
+    float idet = __fdividef(1.0f, idxx*dxx + idxy*dxy + idxs*dxs);
+    float idyy = dxx*dss - dxs*dxs;
+    float idys = dxy*dxs - dxx*dys;
+    float idss = dxx*dyy - dxy*dxy;
+    float pdx = idet*(idxx*dx + idxy*dy + idxs*ds);
+    float pdy = idet*(idxy*dx + idyy*dy + idys*ds);
+    float pds = idet*(idxs*dx + idys*dy + idss*ds);
+    if (pdx<-0.5f || pdx>0.5f || pdy<-0.5f || pdy>0.5f || pds<-0.5f || pds>0.5f) {
+pdx = __fdividef(dx, dxx);
+pdy = __fdividef(dy, dyy);
+pds = __fdividef(ds, dss);
+    }
+    float dval = 0.5f*(dx*pdx + dy*pdy + ds*pds);
+    int maxPts = d_MaxNumPoints;
+    float sc = d_Scales[scale] * exp2f(pds*d_Factor);
+    if (sc>=lowestScale) {
+unsigned int idx = atomicInc(d_PointCounter, 0x7fffffff);
+idx = (idx>=maxPts ? maxPts-1 : idx);
+d_Sift[idx].xpos = xpos + pdx;
+d_Sift[idx].ypos = ypos + pdy ;
+d_Sift[idx].scale = sc;
+d_Sift[idx].sharpness = val + dval;
+d_Sift[idx].edgeness = edge;
+d_Sift[idx].subsampling = subsampling;
+    }
+  }
+}
+
+}
  __global__ void LaplaceMultiTex(cudaTextureObject_t texObj, float *d_Result, int width, int pitch, int height)
 {
   __shared__ float data1[(LAPLACE_W + 2*LAPLACE_R)*LAPLACE_S];

@@ -156,12 +156,18 @@ void ExtractSiftOctave(SiftData &siftData, CudaImage &img, double initBlur, floa
   TimerGPU timer1;
   float baseBlur = pow(2.0f, -1.0f/NUM_SCALES);
   float diffScale = pow(2.0f, 1.0f/NUM_SCALES);
-  LaplaceMulti(texObj, img, diffImg, baseBlur, diffScale, initBlur);
+ /* LaplaceMulti(texObj, img, diffImg, baseBlur, diffScale, initBlur);
   int fstPts = 0;
   safeCall(cudaMemcpyFromSymbol(&fstPts, d_PointCounter, sizeof(int)));
   double sigma = baseBlur*diffScale;
-  FindPointsMulti(diffImg, siftData, thresh, 10.0f, sigma, 1.0f/NUM_SCALES, lowestScale/subsampling, subsampling);
-  //myFindPointsMulti(diffImg, siftData, thresh, 10.0f, sigma, 1.0f/NUM_SCALES, lowestScale/subsampling, subsampling);
+  //FindPointsMulti(diffImg, siftData, thresh, 10.0f, sigma, 1.0f/NUM_SCALES, lowestScale/subsampling, subsampling);
+  //myFindPointsMulti_second(diffImg, siftData, thresh, 10.0f, sigma, 1.0f/NUM_SCALES, lowestScale/subsampling, subsampling);
+  myFindPointsMulti_third(diffImg, siftData, thresh, 10.0f, sigma, 1.0f/NUM_SCALES, lowestScale/subsampling, subsampling);
+*/
+  double sigma = baseBlur*diffScale;
+int fstPts = 0;
+ myFindPointsMulti_laplace(img,siftData, thresh, 10.0f, sigma, 1.0f/NUM_SCALES, lowestScale/subsampling, subsampling,baseBlur, diffScale, initBlur);
+ 
 
   double gpuTimeDoG = timer1.read();
   TimerGPU timer4;
@@ -482,13 +488,158 @@ double myFindPointsMulti(CudaImage *sources, SiftData &siftData, float thresh, f
   safeCall(cudaMemcpyToSymbol(d_Scales, scales, sizeof(float)*NUM_SCALES));
   safeCall(cudaMemcpyToSymbol(d_Factor, &factor, sizeof(float)));
 
-  dim3 blocks(iDivUp(w, MINMAX_W), iDivUp(h, MINMAX_H));
+  dim3 blocks(iDivUp(w, MINMAX_W)*NUM_SCALES, iDivUp(h, MINMAX_H));
   dim3 threads(MINMAX_W + 2); 
 #ifdef MANAGEDMEM
-  myFindPointsMulti<<<blocks, threads>>>(sources->d_data, siftData.m_data, w, p, h, NUM_SCALES, subsampling, lowestScale); 
+  myFindPointsMulti_first<<<blocks, threads>>>(sources->d_data, siftData.m_data, w, p, h, NUM_SCALES, subsampling, lowestScale); 
 #else
-  myFindPointsMulti<<<blocks, threads>>>(sources->d_data, siftData.d_data, w, p, h, NUM_SCALES, subsampling, lowestScale); 
+  myFindPointsMulti_first<<<blocks, threads>>>(sources->d_data, siftData.d_data, w, p, h, NUM_SCALES, subsampling, lowestScale); 
 #endif
+  checkMsg("FindPointsMulti() execution failed\n");
+  return 0.0;
+}
+
+double myFindPointsMulti_second(CudaImage *sources, SiftData &siftData, float thresh, float edgeLimit, float scale, float factor, float lowestScale, float subsampling)
+{
+  if (sources->d_data==NULL) {
+    printf("FindPointsMulti: missing data\n");
+    return 0.0;
+  }
+  int w = sources->width;
+  int p = sources->pitch;
+  int h = sources->height;
+  float threshs[2] = { thresh, -thresh };
+  float scales[NUM_SCALES];  
+  float diffScale = pow(2.0f, factor);
+  for (int i=0;i<NUM_SCALES;i++) {
+    scales[i] = scale;
+    scale *= diffScale;
+  }
+  safeCall(cudaMemcpyToSymbol(d_Threshold, &threshs, 2*sizeof(float)));
+  safeCall(cudaMemcpyToSymbol(d_EdgeLimit, &edgeLimit, sizeof(float)));
+  safeCall(cudaMemcpyToSymbol(d_Scales, scales, sizeof(float)*NUM_SCALES));
+  safeCall(cudaMemcpyToSymbol(d_Factor, &factor, sizeof(float)));
+
+  dim3 blocks(iDivUp(w, MINMAX_W), iDivUp(h, MINMAX_H));
+  dim3 threads(MINMAX_W + 2); 
+   TimerGPU timer_org_find;
+#ifdef MANAGEDMEM
+  myFindPointsMulti_second<<<blocks, threads>>>(sources->d_data, siftData.m_data, w, p, h, NUM_SCALES, subsampling, lowestScale); 
+#else
+  myFindPointsMulti_second<<<blocks, threads>>>(sources->d_data, siftData.d_data, w, p, h, NUM_SCALES, subsampling, lowestScale); 
+   
+  double time_org_find = timer_org_find.read();
+ printf("the time of origin findpoint is %f\n", time_org_find);
+  checkMsg("FindPointsMulti() execution failed\n");
+  return 0.0;
+}
+
+double myFindPointsMulti_third(CudaImage *sources, SiftData &siftData, float thresh, float edgeLimit, float scale, float factor, float lowestScale, float subsampling)
+{
+  if (sources->d_data==NULL) {
+    printf("FindPointsMulti: missing data\n");
+    return 0.0;
+  }
+  int w = sources->width;
+  int p = sources->pitch;
+  int h = sources->height;
+  float threshs[2] = { thresh, -thresh };
+  float scales[NUM_SCALES];  
+  float diffScale = pow(2.0f, factor);
+  for (int i=0;i<NUM_SCALES;i++) {
+    scales[i] = scale;
+    scale *= diffScale;
+  }
+  safeCall(cudaMemcpyToSymbol(d_Threshold, &threshs, 2*sizeof(float)));
+  safeCall(cudaMemcpyToSymbol(d_EdgeLimit, &edgeLimit, sizeof(float)));
+  safeCall(cudaMemcpyToSymbol(d_Scales, scales, sizeof(float)*NUM_SCALES));
+  safeCall(cudaMemcpyToSymbol(d_Factor, &factor, sizeof(float)));
+
+  dim3 blocks(iDivUp(w, MINMAX_W), iDivUp(h, MINMAX_H));
+  //dim3 blocks(1,1);
+  dim3 threads(MINMAX_W + 2,MINMAX_H); 
+  TimerGPU timer_new_find;
+#ifdef MANAGEDMEM
+  myFindPointsMulti_third<<<blocks, threads>>>(sources->d_data, siftData.m_data, w, p, h, NUM_SCALES, subsampling, lowestScale); 
+#else
+  myFindPointsMulti_third<<<blocks, threads>>>(sources->d_data, siftData.d_data, w, p, h, NUM_SCALES, subsampling, lowestScale); 
+//  myFindPointsMulti_stencil_basedon<<<blocks, threads>>>(sources->d_data, siftData.d_data, w, p, h, NUM_SCALES, subsampling, lowestScale); 
+#endif
+  double time_new_find = timer_new_find.read();
+   printf(" \n");
+  printf("the time of new findpoint is %f\n", time_new_find);
+#endif
+  cudaDeviceSynchronize();
+  checkMsg("FindPointsMulti() execution failed\n");
+  return 0.0;
+}
+double myFindPointsMulti_laplace(CudaImage &baseImage, SiftData &siftData, float thresh, float edgeLimit, float scale, float factor, float lowestScale, float subsampling,float baseBlur, float diffScale, float initBlur)
+{
+  float kernel[12*16];
+  //float scale = baseBlur;
+  for (int i=0;i<NUM_SCALES+3;i++) {
+    float kernelSum = 0.0f;
+    float var = baseBlur*baseBlur - initBlur*initBlur;
+    for (int j=-LAPLACE_R;j<=LAPLACE_R;j++) {
+      kernel[16*i+j+LAPLACE_R] = (float)expf(-(double)j*j/2.0/var);
+      kernelSum += kernel[16*i+j+LAPLACE_R];
+    }
+    for (int j=-LAPLACE_R;j<=LAPLACE_R;j++)
+      kernel[16*i+j+LAPLACE_R] /= kernelSum;
+    baseBlur *= diffScale;
+  }
+  safeCall(cudaMemcpyToSymbol(d_Kernel2, kernel, 12*16*sizeof(float)));
+  
+
+  
+
+/*  if (sources->d_data==NULL) {
+    printf("FindPointsMulti: missing data\n");
+    return 0.0;
+  }*/
+  int w = baseImage.width;
+  int p = baseImage.pitch;
+  int h = baseImage.height;
+
+  int width = w;
+  int pitch = p;
+  int height = h;
+
+  float threshs[2] = { thresh, -thresh };
+  float scales[NUM_SCALES];
+  float diffScale_here = pow(2.0f, factor);
+  for (int i=0;i<NUM_SCALES;i++) {
+    scales[i] = scale;
+    scale *= diffScale_here;
+  }
+  safeCall(cudaMemcpyToSymbol(d_Threshold, &threshs, 2*sizeof(float)));
+  safeCall(cudaMemcpyToSymbol(d_EdgeLimit, &edgeLimit, sizeof(float)));
+  safeCall(cudaMemcpyToSymbol(d_Scales, scales, sizeof(float)*NUM_SCALES));
+  safeCall(cudaMemcpyToSymbol(d_Factor, &factor, sizeof(float)));
+
+  dim3 blocks(iDivUp(w, MINMAX_W), iDivUp(h, MINMAX_H));
+  dim3 threads(MINMAX_W + 2);
+  dim3 blocks1(iDivUp(w, MINMAX_W), iDivUp(h, MINMAX_H));
+  dim3 threads1(MINMAX_W + 2,MINMAX_H);
+
+  dim3 myblocks_shuffle(iDivUp(w, 22), iDivUp(h,4));
+  dim3 mythreads_shuffle(24+2*LAPLACE_R, 6);
+
+  TimerGPU timer1;
+
+
+#ifdef MANAGEDMEM
+  //myFindPointsMulti<<<blocks, threads>>>(sources->d_data, siftData.m_data, w, p, h, NUM_SCALES, subsampling, lowestScale);
+  //myFindPointsMulti_z<<<blocks1,threads1>>>(sources->d_data, siftData.m_data, w, p, h, NUM_SCALES, subsampling, lowestScale);
+  myLaplaceMultiMem_register_shuffle_findpoints<<<myblocks_shuffle,mythreads_shuffle>>>(baseImage.d_data, siftData.m_data, w, p, h, NUM_SCALES, subsampling, lowestScale);
+#else
+  //myFindPointsMulti<<<blocks, threads>>>(sources->d_data, siftData.d_data, w, p, h, NUM_SCALES, subsampling, lowestScale);
+  //myFindPointsMulti_z<<<blocks1,threads1>>>(sources->d_data, siftData.d_data, w, p, h, NUM_SCALES, subsampling, lowestScale);
+  myLaplaceMultiMem_register_shuffle_findpoints<<<myblocks_shuffle,mythreads_shuffle>>>(baseImage.d_data, siftData.d_data, w, p, h, NUM_SCALES, subsampling, lowestScale);
+#endif
+cudaDeviceSynchronize();
+double time1 = timer1.read();
+printf("the time of find points is %f\n",time1 );
   checkMsg("FindPointsMulti() execution failed\n");
   return 0.0;
 }

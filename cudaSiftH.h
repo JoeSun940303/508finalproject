@@ -19,5 +19,7 @@ double LowPass(CudaImage &res, CudaImage &src, float scale);
 double LaplaceMulti(cudaTextureObject_t texObj, CudaImage &baseImage, CudaImage *results, float baseBlur, float diffScale, float initBlur);
 double FindPointsMulti(CudaImage *sources, SiftData &siftData, float thresh, float edgeLimit, float scale, float factor, float lowestScale, float subsampling);
 double myFindPointsMulti(CudaImage *sources, SiftData &siftData, float thresh, float edgeLimit, float scale, float factor, float lowestScale, float subsampling);
-
+double myFindPointsMulti_second(CudaImage *sources, SiftData &siftData, float thresh, float edgeLimit, float scale, float factor, float lowestScale, float subsampling);
+double myFindPointsMulti_third(CudaImage *sources, SiftData &siftData, float thresh, float edgeLimit, float scale, float factor, float lowestScale, float subsampling);
+double myFindPointsMulti_laplace(CudaImage &baseImage, SiftData &siftData, float thresh, float edgeLimit, float scale, float factor, float lowestScale, float subsampling,float baseBlur, float diffScale, float initBlur);
 #endif
