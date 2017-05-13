@@ -10,6 +10,49 @@ The code is free to use for non-commercial applications. If you use the code for
 
 M. Bj&ouml;rkman, N. Bergstr&ouml;m and D. Kragic, "Detecting, segmenting and tracking unknown objects using multi-label MRF inference", CVIU, 118, pp. 111-127, January 2014. [ScienceDirect](http://www.sciencedirect.com/science/article/pii/S107731421300194X)
 
+## ECE 508 optimization
+Because there are many kernels with different optimizations in this version of code, so didn't add macro to it.
+So to run the different kernel with different optimization, the following is the information about the kernel
+Please find these kernels in cudaSiftH.cu
+
+For the lowpass kernel: 
+
+    original kernel:LowPass<<<blocks, threads>>>
+
+    kernel with shared memory tiling: myLowPass<<<blocks, threads>>>
+
+    kernel use shuffle: myLowPass_shuffle<<<blocks, threads>>>
+
+
+For the laplace kernel:
+
+    original kernel: LaplaceMultiMem<<<blocks, threads>>>
+
+    kernel with z coarsening and shared mem tiling: myLaplaceMultiMem<<<myblocks, mythreads>>>
+
+    kernel with register tiling: myLaplaceMultiMem_register
+
+    kernel with register tiling and shuffle : myLaplaceMultiMem_register_shuffle
+
+
+For the find point kernel: 
+
+    original kernel: 
+
+    kernel with y direction thread coarsening:
+
+    kernel with y-z direction thread coarsening:
+
+    kernel with z direction thread coarsening:
+
+    combined Laplace kernel and findpoint kernel:
+
+
+For the computeOrientation:
+
+    original kernel:ComputeOrientations<<<blocks, threads>>>
+
+    kernel with shared memory tiling: myComputeOrientations<<<blocks, threads>>>
 
 ## Benchmarking
 
