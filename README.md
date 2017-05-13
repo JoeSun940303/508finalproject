@@ -37,15 +37,15 @@ For the laplace kernel:
 
 For the find point kernel: 
 
-    original kernel: 
+    original kernel: FindPointsMulti - It's a normal function, not a kernel function
 
-    kernel with y direction thread coarsening:
+    kernel with y direction thread coarsening:myFindPointsMulti - normal function
 
-    kernel with y-z direction thread coarsening:
+    kernel with y-z direction thread coarsening: myFindPointsMulti_second - normal function
 
-    kernel with z direction thread coarsening:
+    kernel with z direction thread coarsening:myFindPointsMulti_third -normal function
 
-    combined Laplace kernel and findpoint kernel:
+    combined Laplace kernel and findpoint kernel:myFindPointsMulti_laplace -normal function
 
 
 For the computeOrientation:
