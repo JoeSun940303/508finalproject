@@ -368,13 +368,15 @@ double LowPass(CudaImage &res, CudaImage &src, float scale)
   dim3 blocks(iDivUp(width, LOWPASS_W), iDivUp(height, LOWPASS_H));
   dim3 threads(LOWPASS_W+2*LOWPASS_R, LOWPASS_H);
   //TimerGPU timer1;
-  //myLowPass<<<blocks, threads>>>(src.d_data, res.d_data, width, pitch, height);
+  //LowPass<<<blocks, threads>>>(src.d_data, res.d_data, width, pitch, height);
   //double time1 = timer1.read();
   //TimerGPU timer2;
-  myLowPass_shuffle<<<blocks, threads>>>(src.d_data, res.d_data, width, pitch, height);
+  //myLowPass<<<blocks, threads>>>(src.d_data, res.d_data, width, pitch, height);
   //double time2 = timer2.read();
-  //printf("The before time is %f, the after time is %f \n",time1,time2);
+  //TimerGPU timer3;
   myLowPass_shuffle<<<blocks, threads>>>(src.d_data, res.d_data, width, pitch, height);
+  //double time3 = timer3.read();
+//printf("The first time is %f, the second time is %f, the third time is %f \n",time1,time2,time3);
   checkMsg("LowPass() execution failed\n");
   return 0.0; 
 }
@@ -410,17 +412,17 @@ double LaplaceMulti(cudaTextureObject_t texObj, CudaImage &baseImage, CudaImage 
   dim3 mythreads_shuffle(24+2*LAPLACE_R, 4);
 
 #if 1
-  //TimerGPU timer1;
-  //LaplaceMultiMem<<<blocks, threads>>>(baseImage.d_data, results[0].d_data, width, pitch, height);
-  //myLaplaceMultiMem<<<myblocks, mythreads>>>(baseImage.d_data, results[0].d_data, width, pitch, height);
+  TimerGPU timer1;
+  LaplaceMultiMem<<<blocks, threads>>>(baseImage.d_data, results[0].d_data, width, pitch, height);
+  double time1 = timer1.read();
+  TimerGPU timer2;
+  myLaplaceMultiMem<<<myblocks, mythreads>>>(baseImage.d_data, results[0].d_data, width, pitch, height);
   //myLaplaceMultiMem_register<<<myblocks, mythreads>>>(baseImage.d_data, results[0].d_data, width, pitch, height);
-  //cudaDeviceSynchronize();
-  //double time1 = timer1.read();
-  //TimerGPU timer2;
+  double time2 = timer2.read();
+  TimerGPU timer3;
   myLaplaceMultiMem_register_shuffle<<<myblocks_shuffle, mythreads_shuffle>>>(baseImage.d_data, results[0].d_data, width, pitch, height);
-  //cudaDeviceSynchronize();
-  //double time2 = timer2.read();
-  //printf("The before time is %f, the after time is %f \n",time1,time2);
+  double time3 = timer3.read();
+  printf("The first time is %f, the second time is %f, the third time is %f \n",time1,time2,time3);
 #else
   LaplaceMultiTex<<<blocks, threads>>>(texObj, results[0].d_data, width, pitch, height);
 #endif
