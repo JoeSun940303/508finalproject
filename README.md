@@ -16,26 +16,42 @@ So to run the different kernel with different optimization, the following is the
 Please find these kernels in cudaSiftH.cu
 
 For the lowpass kernel: 
+
     original kernel:LowPass<<<blocks, threads>>>
+
     kernel with shared memory tiling: myLowPass<<<blocks, threads>>>
+
     kernel use shuffle: myLowPass_shuffle<<<blocks, threads>>>
 
+
 For the laplace kernel:
+
     original kernel: LaplaceMultiMem<<<blocks, threads>>>
+
     kernel with z coarsening and shared mem tiling: myLaplaceMultiMem<<<myblocks, mythreads>>>
+
     kernel with register tiling: myLaplaceMultiMem_register
+
     kernel with register tiling and shuffle : myLaplaceMultiMem_register_shuffle
 
+
 For the find point kernel: 
+
     original kernel: 
+
     kernel with y direction thread coarsening:
+
     kernel with y-z direction thread coarsening:
+
     kernel with z direction thread coarsening:
+
     combined Laplace kernel and findpoint kernel:
 
 
 For the computeOrientation:
+
     original kernel:ComputeOrientations<<<blocks, threads>>>
+
     kernel with shared memory tiling: myComputeOrientations<<<blocks, threads>>>
 
 ## Benchmarking
